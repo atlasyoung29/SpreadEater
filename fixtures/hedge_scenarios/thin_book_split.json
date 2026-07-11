@@ -1,0 +1,146 @@
+{
+  "name": "thin_book_split",
+  "description": "YES bid fill resolves by buying part of the opposite side and sell-backing the remainder.",
+  "market": {
+    "condition_id": "market-thin-book-split",
+    "question": "Will the split hedge fixture exercise both hedge and sellback legs?",
+    "yes_token_id": "2001",
+    "no_token_id": "2002",
+    "daily_reward_total": "100",
+    "max_spread": "0.10",
+    "tick_size": "0.01"
+  },
+  "trigger": {
+    "work_item": {
+      "tracked_order": {
+        "order_id": "fill-order-split",
+        "trace_id": "trace-thin-book-split",
+        "leg": "YesBid",
+        "price": "0.74",
+        "size": "10",
+        "matched_size": "0"
+      },
+      "trade": {
+        "trade_id": "trade-thin-book-split",
+        "side": "BUY",
+        "price": "0.74",
+        "size": "10",
+        "maker_order_id": "fill-order-split"
+      },
+      "anchored_order_id": "fill-order-split",
+      "match_source": "maker_order_id",
+      "fallback_match": false,
+      "size_to_apply": "10",
+      "hedge_size": "10"
+    }
+  },
+  "exchange": {
+    "default_fee_rate_bps": 0,
+    "books": {
+      "yes": {
+        "bids": [["0.73", "20"]],
+        "asks": [["0.75", "20"]]
+      },
+      "no": {
+        "bids": [["0.24", "20"]],
+        "asks": [["0.26", "6"], ["0.40", "20"]]
+      }
+    },
+    "balances": [
+      {
+        "amount": "100"
+      }
+    ],
+    "positions": [
+      {
+        "yes_size": "0",
+        "no_size": "0"
+      }
+    ],
+    "global_open_orders": [
+      {
+        "orders": []
+      }
+    ],
+    "market_open_orders": [
+      {
+        "orders": []
+      }
+    ],
+    "actions": [
+      {
+        "kind": "place",
+        "expected_token_id": "2002",
+        "expected_side": "BUY",
+        "expected_order_type": "GTC",
+        "response": {
+          "order_id": "hedge-order-split",
+          "status": "live"
+        },
+        "mutations": {
+          "replace_order_lookup": [
+            {
+              "order_id": "hedge-order-split",
+              "responses": [
+                {
+                  "order": {
+                    "id": "hedge-order-split",
+                    "leg": "NoBid",
+                    "price": "0.27",
+                    "original_size": "6",
+                    "size_matched": "6",
+                    "status": "live",
+                    "order_type": "GTC"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "kind": "cancel",
+        "expected_order_id": "hedge-order-split"
+      },
+      {
+        "kind": "place",
+        "expected_token_id": "2001",
+        "expected_side": "SELL",
+        "expected_order_type": "FOK",
+        "response": {
+          "order_id": "sellback-order-split",
+          "status": "matched"
+        },
+        "mutations": {
+          "replace_balances": [
+            {
+              "amount": "98.42"
+            }
+          ],
+          "replace_positions": [
+            {
+              "yes_size": "6",
+              "no_size": "6"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "success": true,
+    "halted": false,
+    "hedge_side": "BUY",
+    "planned_hedge_shares": "6",
+    "planned_sellback_shares": "4",
+    "result_status": "success",
+    "hedge_leg_status": "success",
+    "sellback_leg_status": "success",
+    "hedge_price": "0.27",
+    "sellback_price": "0.73",
+    "post_sync_yes_size": "6",
+    "post_sync_no_size": "6",
+    "post_sync_net_exposure": "0",
+    "neutrality_residual_exposure": "0"
+  }
+}

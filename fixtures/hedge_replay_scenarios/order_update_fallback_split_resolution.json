@@ -1,0 +1,120 @@
+{
+  "name": "order_update_fallback_split_resolution",
+  "description": "An order update fallback drives the full pre-attribution path and preserves a split hedge-versus-sellback decision.",
+  "market": {
+    "condition_id": "replay-order-update-split",
+    "question": "Will order-update fallback preserve the split hedge-versus-sellback decision?",
+    "yes_token_id": "3501",
+    "no_token_id": "3502",
+    "daily_reward_total": "100",
+    "max_spread": "0.10",
+    "tick_size": "0.01"
+  },
+  "setup": {
+    "tracked_orders": [
+      {
+        "order_id": "fallback-split-order",
+        "trace_id": "trace-fallback-split-order",
+        "leg": "YesBid",
+        "price": "0.74",
+        "size": "10",
+        "matched_size": "0"
+      }
+    ],
+    "cached_balance": "100"
+  },
+  "sequence": [
+    {
+      "kind": "user_order_update",
+      "order": {
+        "order_id": "fallback-split-order",
+        "side": "BUY",
+        "price": "0.74",
+        "original_size": "10",
+        "size_matched": "10"
+      }
+    },
+    { "kind": "flush_pending_fill_fallbacks" }
+  ],
+  "exchange": {
+    "default_fee_rate_bps": 0,
+    "books": {
+      "yes": { "bids": [["0.73", "20"]], "asks": [["0.75", "20"]] },
+      "no": { "bids": [["0.24", "20"]], "asks": [["0.26", "6"], ["0.30", "20"]] }
+    },
+    "balances": [{ "amount": "100" }],
+    "positions": [{ "yes_size": "6", "no_size": "6", "yes_avg_price": "0.74", "no_avg_price": "0.26" }],
+    "global_open_orders": [{ "orders": [] }],
+    "market_open_orders": [{ "orders": [] }],
+    "actions": [
+      {
+        "kind": "place",
+        "expected_token_id": "3502",
+        "expected_side": "BUY",
+        "expected_order_type": "GTC",
+        "response": { "order_id": "fallback-split-hedge-order", "status": "live" },
+        "mutations": {
+          "replace_order_lookup": [
+            {
+              "order_id": "fallback-split-hedge-order",
+              "responses": [
+                {
+                  "order": {
+                    "id": "fallback-split-hedge-order",
+                    "leg": "NoBid",
+                    "price": "0.26",
+                    "original_size": "6",
+                    "size_matched": "6",
+                    "status": "live",
+                    "order_type": "GTC"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      { "kind": "cancel", "expected_order_id": "fallback-split-hedge-order" },
+      {
+        "kind": "place",
+        "expected_token_id": "3501",
+        "expected_side": "SELL",
+        "expected_order_type": "FOK",
+        "response": { "order_id": "fallback-split-sellback-order", "status": "matched" }
+      }
+    ]
+  },
+  "expected": {
+    "critical_events": [
+      {
+        "event_type": "fill_detected",
+        "source_component": "fill_handler",
+        "payload": {
+          "match_source": "order_update_fallback",
+          "fallback_match": true,
+          "anchored_order_id": "fallback-split-order"
+        }
+      },
+      {
+        "event_type": "hedge_intent_created",
+        "payload": {
+          "hedge_side": "BUY"
+        }
+      }
+    ],
+    "success": true,
+    "halted": false,
+    "hedge_side": "BUY",
+    "planned_hedge_shares": "6",
+    "planned_sellback_shares": "4",
+    "result_status": "success",
+    "hedge_leg_status": "success",
+    "sellback_leg_status": "success",
+    "hedge_price": "0.27",
+    "sellback_price": "0.73",
+    "post_sync_yes_size": "6",
+    "post_sync_no_size": "6",
+    "post_sync_net_exposure": "0",
+    "neutrality_residual_exposure": "0"
+  }
+}

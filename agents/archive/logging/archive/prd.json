@@ -1,0 +1,1005 @@
+{
+    "title": "Polymarket Hedged Liquidity Rewards Bot",
+    "version": "0.2",
+    "mvp_horizon": "MVP is real-data shadow mode; full product is a live hedged four-quote bot",
+    "problem": {
+        "summary": "Build a high-performance local-first Rust system for Polymarket that validates and then executes a reward-first, fully hedged binary market-making strategy.",
+        "context": "The MVP must use real Polymarket data to discover reward-eligible binary markets, compute candidate quotes, compute full-size immediate hedgeability from opposite-outcome depth, and report what would be traded without placing live orders. The full product then adds auth, inventory, live orders, and fill-triggered offsetting hedges."
+    },
+    "goals": [
+        "Use real market data to validate selection, quote math, and hedgeability before live trading.",
+        "Trade only binary reward-eligible markets with summed daily rewards of at least 20.",
+        "Model four quote legs: YES bid, YES ask, NO bid, NO ask.",
+        "Approve quotes only when the full intended fill size is immediately hedgeable using opposite-outcome liquidity.",
+        "Prefer passive reward capture and execute a hedge only after a resting order fills.",
+        "Persist enough data for audit, replay, and later strategy refinement."
+    ],
+    "non_goals": [
+        "Directional or speculative trading.",
+        "Heavy frontend development.",
+        "Manual market allowlists by type or name as a required filter.",
+        "Multi-outcome or negative-risk market making in the first live version.",
+        "Dependence on pre-existing external historical order-book archives.",
+        "Multi-tenant SaaS deployment."
+    ],
+    "success_metrics": [
+        {
+            "metric": "Reward-threshold compliance",
+            "target": "100% of selected markets satisfy daily_reward_total >= 20 and binary reward eligibility",
+            "notes": "Rules-based universe"
+        },
+        {
+            "metric": "Pre-trade verification coverage",
+            "target": "100% of selected quotes pass identity, book, and hedgeability checks before approval",
+            "notes": "Fail closed"
+        },
+        {
+            "metric": "Shadow-mode recompute latency",
+            "target": "< 50 ms p95 excluding external network latency",
+            "notes": "Measured on local host"
+        },
+        {
+            "metric": "Live fill-to-hedge-intent latency",
+            "target": "< 150 ms p95 excluding external network latency",
+            "notes": "Applies to live mode only"
+        },
+        {
+            "metric": "Shadow reporting completeness",
+            "target": "100% of evaluated markets produce explicit trade/no-trade reasons",
+            "notes": "Supports strategy validation"
+        },
+        {
+            "metric": "Unresolved unhedged incidents",
+            "target": "0 unresolved incidents beyond configured timeout in normal live operation",
+            "notes": "Applies after live mode is enabled"
+        }
+    ],
+    "personas": [
+        {
+            "name": "Owner-Operator",
+            "job_to_be_done": "Run the bot locally, validate the strategy in shadow mode, then enable live trading with strict controls.",
+            "pain_points": [
+                "Need for high performance with low operational overhead",
+                "Need for transparent reasons for trade or no-trade decisions",
+                "Need for strict risk controls and kill switches"
+            ]
+        },
+        {
+            "name": "Strategy Researcher",
+            "job_to_be_done": "Use captured real data to validate the math, improve hedgeability logic, and refine thresholds.",
+            "pain_points": [
+                "No guaranteed documented aggregate market-maker score endpoint",
+                "Need for replayable normalized data",
+                "Need visibility into hedgeability and reward-vs-cost logic"
+            ]
+        }
+    ],
+    "scope": {
+        "in": [
+            "Rust backend and core services",
+            "Real-data shadow mode MVP",
+            "Public market discovery and reward ingestion",
+            "REST bootstrap and WebSocket order-book maintenance",
+            "Rules-based market universe using reward threshold",
+            "Four-leg quote modeling",
+            "Immediate opposite-outcome hedgeability engine",
+            "Reward-vs-cost decision reporting",
+            "Postgres operational storage",
+            "Research archive files",
+            "Live mode with auth, inventory, orders, hedging, and kill switches in later phases"
+        ],
+        "out": [
+            "Heavy frontend UI",
+            "Manual category or name allowlists as a required selection mechanism",
+            "Multi-outcome or negative-risk MM in the first live version",
+            "Cross-exchange hedging",
+            "Predictive alpha models",
+            "Hosted cloud control plane as a requirement"
+        ]
+    },
+    "journeys": [
+        {
+            "name": "Shadow discovery and selection",
+            "steps": [
+                "Fetch candidate markets and reward metadata",
+                "Filter to binary reward-eligible markets with daily_reward_total >= 20",
+                "Reconcile condition IDs, token IDs, outcomes, and reward configuration",
+                "Bootstrap YES and NO books",
+                "Compute quote candidates and full-size hedgeability",
+                "Report selected and rejected markets with reasons"
+            ],
+            "edge_cases": [
+                "Token mapping mismatch across sources",
+                "Reward-eligible market fails hedgeability",
+                "Books are stale or inconsistent",
+                "Reward settings change while monitored"
+            ]
+        },
+        {
+            "name": "Shadow quote evaluation",
+            "steps": [
+                "Maintain YES and NO books from REST plus WebSocket",
+                "Generate four candidate quote legs",
+                "Compute weighted-average opposite-side hedge cost for full candidate size",
+                "Apply reward-vs-cost gate",
+                "Emit trade or no-trade report"
+            ],
+            "edge_cases": [
+                "Top of book appears sufficient but deeper hedge cost fails",
+                "One or more legs are suppressed",
+                "Insufficient opposite-outcome depth for full fill size"
+            ]
+        },
+        {
+            "name": "Live fill and offsetting hedge",
+            "steps": [
+                "Post passive limit orders",
+                "Receive fill event",
+                "Measure deviation from target exposure or inventory",
+                "Execute offsetting opposite-outcome hedge if needed",
+                "Return to target posture or kill-switch"
+            ],
+            "edge_cases": [
+                "Partial fill",
+                "Opposite-side liquidity disappears before hedge",
+                "User feed reconnect requires reconciliation",
+                "Unhedged timeout breach"
+            ]
+        }
+    ],
+    "functional_requirements": [
+        {
+            "epic": "Market discovery and reward intake",
+            "stories": [
+                {
+                    "id": "FR-1",
+                    "story": "The system MUST discover candidate markets from public Polymarket market surfaces.",
+                    "acceptance_criteria": [
+                        "Given a discovery cycle, when the system runs, then it fetches candidate binary markets and associated reward metadata.",
+                        "Given a candidate market, when normalized, then it includes condition_id, market_slug, question, outcomes, token IDs, state fields, and reward config if present.",
+                        "Given a market with more than two outcomes, when evaluated, then it is rejected."
+                    ],
+                    "priority": "P0",
+                    "notes": "Binary strategy only"
+                },
+                {
+                    "id": "FR-2",
+                    "story": "The system MUST use a rules-based market universe instead of a manual name or type allowlist.",
+                    "acceptance_criteria": [
+                        "Given discovered markets, when eligibility is computed, then only binary reward-eligible markets with daily_reward_total >= 20 are included.",
+                        "Given multiple rewards_daily_rate entries, when evaluated, then the system sums them into daily_reward_total.",
+                        "Given reward data is missing or malformed, when evaluated, then the market is rejected."
+                    ],
+                    "priority": "P0",
+                    "notes": "Threshold configurable later"
+                },
+                {
+                    "id": "FR-3",
+                    "story": "The system MUST reconcile one canonical market identity across metadata and book sources.",
+                    "acceptance_criteria": [
+                        "Given multiple sources, when reconciliation runs, then mismatched condition IDs, token IDs, or outcome labels cause rejection.",
+                        "Given successful reconciliation, when stored, then one canonical mapping from condition_id to YES and NO token IDs exists.",
+                        "Given canonical identity changes after admission, when detected, then the market is quarantined."
+                    ],
+                    "priority": "P0",
+                    "notes": "Fail closed"
+                }
+            ]
+        },
+        {
+            "epic": "Live market data foundation",
+            "stories": [
+                {
+                    "id": "FR-4",
+                    "story": "The system MUST bootstrap each YES and NO book from REST before streaming updates.",
+                    "acceptance_criteria": [
+                        "Given an admitted market, when bootstrap begins, then both YES and NO books are fetched by token ID.",
+                        "Given a returned book, when normalized, then bids, asks, timestamp, and identifiers are stored.",
+                        "Given bootstrap fails, when quote evaluation is attempted, then the market remains non-tradable."
+                    ],
+                    "priority": "P0",
+                    "notes": "REST first"
+                },
+                {
+                    "id": "FR-5",
+                    "story": "The system MUST maintain local market state using WebSocket updates with controlled REST resync.",
+                    "acceptance_criteria": [
+                        "Given subscribed asset IDs, when market updates arrive, then local state is updated atomically.",
+                        "Given drift or gaps are suspected, when detected, then a REST resync is performed.",
+                        "Given degraded state, when safety cannot be guaranteed, then quote approval is blocked."
+                    ],
+                    "priority": "P0",
+                    "notes": "WebSocket-first runtime"
+                },
+                {
+                    "id": "FR-6",
+                    "story": "The live system MUST ingest authenticated user order and trade events.",
+                    "acceptance_criteria": [
+                        "Given live mode, when user-channel events arrive, then local order and exposure state is updated.",
+                        "Given reconnect, when state may be incomplete, then open orders are reconciled.",
+                        "Given shadow mode, when no trading is enabled, then user-channel ingestion may be disabled."
+                    ],
+                    "priority": "P1",
+                    "notes": "Not required for MVP"
+                }
+            ]
+        },
+        {
+            "epic": "Strategy math and quote planning",
+            "stories": [
+                {
+                    "id": "FR-7",
+                    "story": "The system MUST model four quote legs per admitted market.",
+                    "acceptance_criteria": [
+                        "Given a market state, when planning runs, then YES bid, YES ask, NO bid, and NO ask are evaluated.",
+                        "Given a leg is not viable, when outputs are produced, then a suppression reason is recorded.",
+                        "Given shadow mode, when asks are modeled, then inventory assumptions are clearly labeled if simulated."
+                    ],
+                    "priority": "P0",
+                    "notes": "Four-leg strategy"
+                },
+                {
+                    "id": "FR-8",
+                    "story": "The system MUST only approve a quote size that is immediately hedgeable in full using opposite-outcome liquidity.",
+                    "acceptance_criteria": [
+                        "Given a candidate quote with size q, when hedgeability is computed, then the engine walks opposite-outcome depth until q is satisfied or liquidity is exhausted.",
+                        "Given sufficient depth, when cost is computed, then weighted-average hedge price, total hedge cost, and slippage are calculated for the full q.",
+                        "Given insufficient depth or excessive cost, when evaluated, then the quote is rejected or downsized.",
+                        "Given a shadow report, when displayed, then max_hedgeable_size is included."
+                    ],
+                    "priority": "P0",
+                    "notes": "Core strategy gate"
+                },
+                {
+                    "id": "FR-9",
+                    "story": "The system MUST only approve quotes when expected reward opportunity exceeds estimated hedge and execution cost.",
+                    "acceptance_criteria": [
+                        "Given a candidate quote set, when viability is computed, then reward opportunity, hedge cost, and adverse-selection penalty are estimated.",
+                        "Given estimated costs exceed configured threshold, when evaluated, then the quote set is rejected.",
+                        "Given uncertainty is high, when data is insufficient, then the market is downgraded or rejected."
+                    ],
+                    "priority": "P0",
+                    "notes": "Conservative by default"
+                },
+                {
+                    "id": "FR-10",
+                    "story": "The strategy MUST remain passive-first and only hedge after a resting order fills.",
+                    "acceptance_criteria": [
+                        "Given no fill, when the market remains stable, then the system does not pre-hedge by crossing the spread.",
+                        "Given a resting order fills, when imbalance appears, then hedge execution is allowed.",
+                        "Given shadow mode, when reporting occurs, then hedge actions are hypothetical and only modeled after hypothetical fills."
+                    ],
+                    "priority": "P0",
+                    "notes": "No proactive hedge crossing"
+                }
+            ]
+        },
+        {
+            "epic": "Live trading, inventory, and risk",
+            "stories": [
+                {
+                    "id": "FR-11",
+                    "story": "The live bot MUST support Polymarket authentication and signed trading requests.",
+                    "acceptance_criteria": [
+                        "Given live mode, when auth initializes, then API credentials are loaded or derived correctly.",
+                        "Given authenticated requests are sent, when trading runs, then required auth is attached correctly.",
+                        "Given auth failure, when detected, then trading does not start."
+                    ],
+                    "priority": "P1",
+                    "notes": "Live mode only"
+                },
+                {
+                    "id": "FR-12",
+                    "story": "The live bot MUST distinguish owned inventory from external market liquidity.",
+                    "acceptance_criteria": [
+                        "Given a YES ask, when approval is checked, then owned YES inventory is required or intentionally created.",
+                        "Given a NO ask, when approval is checked, then owned NO inventory is required or intentionally created.",
+                        "Given a bid, when approval is checked, then available collateral is required.",
+                        "Given split or merge support is enabled, when needed, then complete sets may be created or collapsed."
+                    ],
+                    "priority": "P1",
+                    "notes": "Inventory is owned position state, not book depth"
+                },
+                {
+                    "id": "FR-13",
+                    "story": "The live bot MUST execute an offsetting opposite-outcome hedge when a fill creates unacceptable imbalance.",
+                    "acceptance_criteria": [
+                        "Given a resting order fill, when exposure or inventory deviates beyond tolerance, then an offsetting hedge intent is created immediately.",
+                        "Given opposite-outcome liquidity remains available, when the hedge executes, then the system moves back toward target posture.",
+                        "Given the hedge cannot complete within cost or time limits, when detected, then the market is de-risked or kill-switched."
+                    ],
+                    "priority": "P1",
+                    "notes": "Offsetting hedge execution"
+                },
+                {
+                    "id": "FR-14",
+                    "story": "The live bot MUST manage passive limit orders for approved quote intents.",
+                    "acceptance_criteria": [
+                        "Given approved live quote intents, when execution runs, then orders are submitted as passive limit orders and tracked locally.",
+                        "Given quote drift exceeds thresholds, when detected, then cancel-replace is used.",
+                        "Given market disablement, when triggered, then open orders for that market are canceled."
+                    ],
+                    "priority": "P1",
+                    "notes": "After MVP"
+                },
+                {
+                    "id": "FR-15",
+                    "story": "The system MUST enforce hard risk controls in both shadow and live modes.",
+                    "acceptance_criteria": [
+                        "Given stale books, auth failure, identity mismatch, or unresolved drift, when detected, then the market is halted.",
+                        "Given live mode and unhedged timeout exceeds threshold, when detected, then the market is kill-switched.",
+                        "Given capital limits are exceeded, when detected, then no new quotes are approved."
+                    ],
+                    "priority": "P1",
+                    "notes": "Shadow mode uses non-trading halts"
+                }
+            ]
+        },
+        {
+            "epic": "Persistence, reporting, and research",
+            "stories": [
+                {
+                    "id": "FR-16",
+                    "story": "The system MUST persist market, reward, book, quote, hedgeability, and decision events.",
+                    "acceptance_criteria": [
+                        "Given any relevant event, when persisted, then event time and ingest time are stored.",
+                        "Given restart, when recovery runs, then monitored state can be rebuilt from storage plus fresh sync.",
+                        "Given a finished session, when reviewed, then all selected and rejected markets are reconstructable."
+                    ],
+                    "priority": "P0",
+                    "notes": "Required for MVP"
+                },
+                {
+                    "id": "FR-17",
+                    "story": "The MVP MUST report what the bot would do using real data.",
+                    "acceptance_criteria": [
+                        "Given an evaluated market, when reporting occurs, then reward total, book summary, candidate quotes, max hedgeable size, estimated hedge cost, and final trade or no-trade decision are output.",
+                        "Given a rejected market, when reporting occurs, then explicit reasons are output.",
+                        "Given a hypothetical fill, when simulated, then the offsetting hedge that would be attempted is output."
+                    ],
+                    "priority": "P0",
+                    "notes": "Primary MVP deliverable"
+                },
+                {
+                    "id": "FR-18",
+                    "story": "The system SHOULD estimate reward competitiveness locally and calibrate assumptions when possible.",
+                    "acceptance_criteria": [
+                        "Given local books and reward configuration, when estimation runs, then a local score proxy is computed.",
+                        "Given per-order scoring checks are available, when sampled, then assumptions are calibrated.",
+                        "Given aggregate score is not directly documented in reviewed docs, when reporting occurs, then aggregate estimates are labeled approximate."
+                    ],
+                    "priority": "P1",
+                    "notes": "Improvement layer"
+                }
+            ]
+        }
+    ],
+    "nonfunctional_requirements": [
+        {
+            "id": "NFR-1",
+            "requirement": "The system MUST use Rust for latency-sensitive services.",
+            "priority": "P0"
+        },
+        {
+            "id": "NFR-2",
+            "requirement": "Market-data ingestion from WebSocket event receipt to normalized in-memory state update SHOULD complete in under 100 ms p95 on local hardware, excluding external network latency.",
+            "priority": "P0"
+        },
+        {
+            "id": "NFR-3",
+            "requirement": "Shadow-mode recomputation after a relevant market event SHOULD complete in under 50 ms p95, excluding external network latency.",
+            "priority": "P0"
+        },
+        {
+            "id": "NFR-4",
+            "requirement": "Live fill-to-hedge-intent creation SHOULD complete in under 150 ms p95, excluding external network latency.",
+            "priority": "P1"
+        },
+        {
+            "id": "NFR-5",
+            "requirement": "The system MUST prefer WebSocket-first ingestion over aggressive polling for live data.",
+            "priority": "P0"
+        },
+        {
+            "id": "NFR-6",
+            "requirement": "Secrets MUST never be written to logs, reports, or crash output.",
+            "priority": "P0"
+        },
+        {
+            "id": "NFR-7",
+            "requirement": "The system MUST fail closed on auth inconsistency, identity mismatch, or unresolved book drift.",
+            "priority": "P0"
+        },
+        {
+            "id": "NFR-8",
+            "requirement": "Tracing SHOULD be optional and low-overhead.",
+            "priority": "P1"
+        }
+    ],
+    "data_model": [
+        {
+            "entity": "Market",
+            "fields": [
+                {
+                    "name": "condition_id",
+                    "type": "string",
+                    "notes": "Canonical market ID"
+                },
+                {
+                    "name": "market_slug",
+                    "type": "string",
+                    "notes": "Human-readable slug"
+                },
+                {
+                    "name": "question",
+                    "type": "string",
+                    "notes": "Market name/question"
+                },
+                {
+                    "name": "active",
+                    "type": "boolean",
+                    "notes": "Market active flag"
+                },
+                {
+                    "name": "closed",
+                    "type": "boolean",
+                    "notes": "Closed flag"
+                },
+                {
+                    "name": "archived",
+                    "type": "boolean",
+                    "notes": "Archived flag"
+                },
+                {
+                    "name": "accepting_orders",
+                    "type": "boolean",
+                    "notes": "Accepting orders flag"
+                },
+                {
+                    "name": "is_binary",
+                    "type": "boolean",
+                    "notes": "Exactly YES/NO outcomes"
+                }
+            ]
+        },
+        {
+            "entity": "OutcomeToken",
+            "fields": [
+                {
+                    "name": "token_id",
+                    "type": "string",
+                    "notes": "CLOB token ID"
+                },
+                {
+                    "name": "condition_id",
+                    "type": "string",
+                    "notes": "Parent market"
+                },
+                {
+                    "name": "outcome",
+                    "type": "string",
+                    "notes": "YES or NO"
+                },
+                {
+                    "name": "last_price",
+                    "type": "number",
+                    "notes": "Most recent known price"
+                }
+            ]
+        },
+        {
+            "entity": "RewardConfig",
+            "fields": [
+                {
+                    "name": "condition_id",
+                    "type": "string",
+                    "notes": "Parent market"
+                },
+                {
+                    "name": "daily_reward_rates",
+                    "type": "array<number>",
+                    "notes": "Raw rewards_daily_rate entries"
+                },
+                {
+                    "name": "daily_reward_total",
+                    "type": "number",
+                    "notes": "Summed reward rate"
+                },
+                {
+                    "name": "min_size",
+                    "type": "number",
+                    "notes": "Reward minimum size"
+                },
+                {
+                    "name": "max_spread",
+                    "type": "number",
+                    "notes": "Reward maximum spread"
+                }
+            ]
+        },
+        {
+            "entity": "OrderBookSnapshot",
+            "fields": [
+                {
+                    "name": "token_id",
+                    "type": "string",
+                    "notes": "Book token"
+                },
+                {
+                    "name": "exchange_ts",
+                    "type": "string",
+                    "notes": "Exchange timestamp"
+                },
+                {
+                    "name": "ingest_ts",
+                    "type": "string",
+                    "notes": "Local ingest time"
+                },
+                {
+                    "name": "bids",
+                    "type": "array<object>",
+                    "notes": "Bid levels"
+                },
+                {
+                    "name": "asks",
+                    "type": "array<object>",
+                    "notes": "Ask levels"
+                },
+                {
+                    "name": "best_bid",
+                    "type": "number",
+                    "notes": "Top bid"
+                },
+                {
+                    "name": "best_ask",
+                    "type": "number",
+                    "notes": "Top ask"
+                },
+                {
+                    "name": "mid",
+                    "type": "number",
+                    "notes": "Computed midpoint"
+                }
+            ]
+        },
+        {
+            "entity": "QuoteCandidate",
+            "fields": [
+                {
+                    "name": "condition_id",
+                    "type": "string",
+                    "notes": "Parent market"
+                },
+                {
+                    "name": "leg",
+                    "type": "string",
+                    "notes": "YES_BID, YES_ASK, NO_BID, NO_ASK"
+                },
+                {
+                    "name": "price",
+                    "type": "number",
+                    "notes": "Candidate quote price"
+                },
+                {
+                    "name": "size",
+                    "type": "number",
+                    "notes": "Candidate quote size"
+                },
+                {
+                    "name": "status",
+                    "type": "string",
+                    "notes": "APPROVED, REJECTED, SUPPRESSED, or SIMULATED_ONLY"
+                },
+                {
+                    "name": "reason",
+                    "type": "string",
+                    "notes": "Reason code"
+                }
+            ]
+        },
+        {
+            "entity": "HedgeabilityReport",
+            "fields": [
+                {
+                    "name": "condition_id",
+                    "type": "string",
+                    "notes": "Parent market"
+                },
+                {
+                    "name": "trigger_leg",
+                    "type": "string",
+                    "notes": "Leg that would fill"
+                },
+                {
+                    "name": "candidate_size",
+                    "type": "number",
+                    "notes": "Proposed fill size"
+                },
+                {
+                    "name": "opposite_token_id",
+                    "type": "string",
+                    "notes": "Token used for offsetting hedge"
+                },
+                {
+                    "name": "opposite_depth_available",
+                    "type": "number",
+                    "notes": "Depth available across evaluated levels"
+                },
+                {
+                    "name": "max_hedgeable_size",
+                    "type": "number",
+                    "notes": "Largest size fully hedgeable now"
+                },
+                {
+                    "name": "weighted_avg_hedge_price",
+                    "type": "number",
+                    "notes": "VWAP for hedge"
+                },
+                {
+                    "name": "estimated_hedge_cost",
+                    "type": "number",
+                    "notes": "Total hedge cost"
+                },
+                {
+                    "name": "slippage_bps",
+                    "type": "number",
+                    "notes": "Estimated hedge slippage"
+                },
+                {
+                    "name": "is_approved",
+                    "type": "boolean",
+                    "notes": "Pass or fail"
+                }
+            ]
+        },
+        {
+            "entity": "DecisionReport",
+            "fields": [
+                {
+                    "name": "condition_id",
+                    "type": "string",
+                    "notes": "Parent market"
+                },
+                {
+                    "name": "daily_reward_total",
+                    "type": "number",
+                    "notes": "Summed daily reward"
+                },
+                {
+                    "name": "score_proxy",
+                    "type": "number",
+                    "notes": "Approximate competitiveness score"
+                },
+                {
+                    "name": "quote_set_status",
+                    "type": "string",
+                    "notes": "Approved or rejected summary"
+                },
+                {
+                    "name": "would_trade",
+                    "type": "boolean",
+                    "notes": "Final decision"
+                },
+                {
+                    "name": "reasons",
+                    "type": "array<string>",
+                    "notes": "Decision reasons"
+                }
+            ]
+        },
+        {
+            "entity": "Position",
+            "fields": [
+                {
+                    "name": "condition_id",
+                    "type": "string",
+                    "notes": "Parent market"
+                },
+                {
+                    "name": "yes_inventory",
+                    "type": "number",
+                    "notes": "Owned YES inventory"
+                },
+                {
+                    "name": "no_inventory",
+                    "type": "number",
+                    "notes": "Owned NO inventory"
+                },
+                {
+                    "name": "collateral_balance",
+                    "type": "number",
+                    "notes": "Available collateral"
+                },
+                {
+                    "name": "net_exposure",
+                    "type": "number",
+                    "notes": "Deviation from target posture"
+                }
+            ]
+        }
+    ],
+    "apis": [
+        {
+            "name": "Candidate market discovery",
+            "method": "GET",
+            "path": "/sampling-markets or equivalent market discovery source",
+            "request": {
+                "min_daily_reward": 20
+            },
+            "response": {
+                "data": [
+                    {
+                        "condition_id": "string",
+                        "question": "string",
+                        "market_slug": "string",
+                        "rewards": {
+                            "rates": [
+                                {
+                                    "asset_address": "string",
+                                    "rewards_daily_rate": 0
+                                }
+                            ],
+                            "min_size": 0,
+                            "max_spread": 0
+                        },
+                        "tokens": [
+                            {
+                                "token_id": "string",
+                                "outcome": "YES"
+                            },
+                            {
+                                "token_id": "string",
+                                "outcome": "NO"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "errors": [
+                "unexpected schema",
+                "reward data missing",
+                "reconciliation mismatch"
+            ]
+        },
+        {
+            "name": "Book bootstrap",
+            "method": "GET",
+            "path": "/book",
+            "request": {
+                "token_id": "string"
+            },
+            "response": {
+                "market": "string",
+                "asset_id": "string",
+                "timestamp": "string",
+                "bids": [
+                    {
+                        "price": "0.45",
+                        "size": "80"
+                    }
+                ],
+                "asks": [
+                    {
+                        "price": "0.46",
+                        "size": "100"
+                    }
+                ]
+            },
+            "errors": [
+                "404 token not found",
+                "stale bootstrap failure"
+            ]
+        },
+        {
+            "name": "Internal hedgeability check",
+            "method": "POST",
+            "path": "/engine/hedgeability",
+            "request": {
+                "condition_id": "string",
+                "trigger_leg": "YES_BID",
+                "candidate_size": 100,
+                "opposite_book": {
+                    "levels": [
+                        {
+                            "price": 0.54,
+                            "size": 40
+                        },
+                        {
+                            "price": 0.55,
+                            "size": 30
+                        },
+                        {
+                            "price": 0.56,
+                            "size": 50
+                        }
+                    ]
+                },
+                "constraints": {
+                    "max_hedge_cost": 56.0,
+                    "max_slippage_bps": 80
+                }
+            },
+            "response": {
+                "max_hedgeable_size": 100,
+                "weighted_avg_hedge_price": 0.551,
+                "estimated_hedge_cost": 55.1,
+                "slippage_bps": 73,
+                "is_approved": true
+            },
+            "errors": [
+                "insufficient opposite depth",
+                "hedge cost too high",
+                "invalid market state"
+            ]
+        },
+        {
+            "name": "Shadow decision report",
+            "method": "POST",
+            "path": "/engine/shadow-decision",
+            "request": {
+                "condition_id": "string"
+            },
+            "response": {
+                "daily_reward_total": 25,
+                "candidate_quotes": [
+                    {
+                        "leg": "YES_BID",
+                        "price": 0.45,
+                        "size": 100,
+                        "status": "APPROVED"
+                    },
+                    {
+                        "leg": "YES_ASK",
+                        "price": 0.46,
+                        "size": 100,
+                        "status": "SIMULATED_ONLY"
+                    },
+                    {
+                        "leg": "NO_BID",
+                        "price": 0.54,
+                        "size": 100,
+                        "status": "APPROVED"
+                    },
+                    {
+                        "leg": "NO_ASK",
+                        "price": 0.55,
+                        "size": 100,
+                        "status": "SIMULATED_ONLY"
+                    }
+                ],
+                "reward_viability": {
+                    "estimated_reward": 3.8,
+                    "estimated_hedge_cost": 1.2,
+                    "estimated_edge": 2.6
+                },
+                "would_trade": true,
+                "reasons": []
+            },
+            "errors": [
+                "hedgeability failed",
+                "reward threshold failed",
+                "market identity mismatch"
+            ]
+        }
+    ],
+    "analytics": [
+        {
+            "event": "market_discovered",
+            "trigger": "A candidate market is discovered from public endpoints",
+            "properties": [
+                "condition_id",
+                "market_slug",
+                "daily_reward_total"
+            ]
+        },
+        {
+            "event": "market_rejected",
+            "trigger": "A candidate market fails any admission rule",
+            "properties": [
+                "condition_id",
+                "reason",
+                "daily_reward_total"
+            ]
+        },
+        {
+            "event": "market_selected",
+            "trigger": "A market passes discovery and validation gates",
+            "properties": [
+                "condition_id",
+                "daily_reward_total",
+                "score_proxy"
+            ]
+        },
+        {
+            "event": "quote_candidate_generated",
+            "trigger": "A four-leg quote model is produced",
+            "properties": [
+                "condition_id",
+                "leg",
+                "price",
+                "size",
+                "status"
+            ]
+        },
+        {
+            "event": "hedgeability_passed",
+            "trigger": "A candidate quote passes full-size immediate hedgeability",
+            "properties": [
+                "condition_id",
+                "leg",
+                "candidate_size",
+                "max_hedgeable_size",
+                "estimated_hedge_cost"
+            ]
+        },
+        {
+            "event": "hedgeability_failed",
+            "trigger": "A candidate quote fails full-size immediate hedgeability",
+            "properties": [
+                "condition_id",
+                "leg",
+                "candidate_size",
+                "reason"
+            ]
+        },
+        {
+            "event": "shadow_trade_approved",
+            "trigger": "A market passes final shadow-mode viability checks",
+            "properties": [
+                "condition_id",
+                "estimated_reward",
+                "estimated_hedge_cost",
+                "estimated_edge"
+            ]
+        },
+        {
+            "event": "live_offsetting_hedge_started",
+            "trigger": "A live fill requires an offsetting hedge",
+            "properties": [
+                "condition_id",
+                "trigger_leg",
+                "size",
+                "net_exposure"
+            ]
+        }
+    ],
+    "risks": [
+        {
+            "risk": "No documented aggregate market-maker score endpoint identified in reviewed docs",
+            "impact": "Reward-share forecasts may be approximate",
+            "mitigation": "Use conservative local score proxy and calibrate with per-order scoring checks"
+        },
+        {
+            "risk": "Opposite-side liquidity may disappear between evaluation and fill",
+            "impact": "Live hedge cost may exceed modeled hedge cost",
+            "mitigation": "Use conservative size caps, slippage caps, and timeout-based kill switches"
+        },
+        {
+            "risk": "Four-sided live quoting requires owned inventory for asks",
+            "impact": "Some modeled quote sets may not be live-deployable without split inventory",
+            "mitigation": "Separate shadow modeling from live inventory eligibility and support split/merge flows"
+        },
+        {
+            "risk": "Excess REST polling may create throttling or degraded recovery behavior",
+            "impact": "Book maintenance can become unstable",
+            "mitigation": "Use WebSocket-first runtime and bounded REST resync"
+        }
+    ],
+    "open_questions": [
+        "What exact max hedge-cost rule should gate quote approval?",
+        "What exact slippage cap should gate quote approval?",
+        "Should asks be fully modeled in shadow mode even when live inventory is not present?",
+        "What is the initial per-market capital cap in live mode?",
+        "What hedge timeout should trigger a kill switch?"
+    ],
+    "assumptions": [
+        "Rust provides the best balance of speed, safety, and implementation practicality for this system.",
+        "The full product is a live bot, but the MVP is a real-data shadow system.",
+        "Markets are selected by reward eligibility and daily reward threshold rather than a manual type or name allowlist.",
+        "Only binary markets are targeted in this version.",
+        "A quote is valid only if its full fill size is immediately hedgeable using opposite-outcome depth at acceptable cost.",
+        "The strategy remains passive-first and only executes a hedge after a fill.",
+        "Inventory means owned YES and NO tokens plus collateral, not external market depth.",
+        "Historical research begins with data captured by this system."
+    ]
+}

@@ -1,0 +1,82 @@
+{
+  "name": "resolution_failure_halts_market",
+  "description": "No hedge depth and no sellback depth leave residual exposure unresolved and halt the market.",
+  "market": {
+    "condition_id": "market-resolution-failure",
+    "question": "Will the failure fixture halt on unresolved exposure?",
+    "yes_token_id": "4001",
+    "no_token_id": "4002",
+    "daily_reward_total": "100",
+    "max_spread": "0.10",
+    "tick_size": "0.01"
+  },
+  "trigger": {
+    "work_item": {
+      "tracked_order": {
+        "order_id": "fill-order-failure",
+        "trace_id": "trace-resolution-failure",
+        "leg": "YesBid",
+        "price": "0.74",
+        "size": "5",
+        "matched_size": "0"
+      },
+      "trade": {
+        "trade_id": "trade-resolution-failure",
+        "side": "BUY",
+        "price": "0.74",
+        "size": "5",
+        "maker_order_id": "fill-order-failure"
+      },
+      "anchored_order_id": "fill-order-failure",
+      "match_source": "maker_order_id",
+      "fallback_match": false,
+      "size_to_apply": "5",
+      "hedge_size": "5"
+    }
+  },
+  "exchange": {
+    "default_fee_rate_bps": 0,
+    "books": {
+      "yes": {
+        "bids": [],
+        "asks": []
+      },
+      "no": {
+        "bids": [],
+        "asks": []
+      }
+    },
+    "balances": [
+      {
+        "amount": "100"
+      }
+    ],
+    "positions": [
+      {
+        "yes_size": "5",
+        "no_size": "0"
+      }
+    ],
+    "global_open_orders": [
+      {
+        "orders": []
+      }
+    ],
+    "market_open_orders": [
+      {
+        "orders": []
+      }
+    ]
+  },
+  "expected": {
+    "success": false,
+    "halted": true,
+    "hedge_side": "BUY",
+    "result_status": "failed",
+    "hedge_leg_status": "skipped",
+    "sellback_leg_status": "skipped",
+    "post_sync_yes_size": "5",
+    "post_sync_no_size": "0",
+    "post_sync_net_exposure": "5"
+  }
+}

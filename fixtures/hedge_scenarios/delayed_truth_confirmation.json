@@ -1,0 +1,126 @@
+{
+  "name": "delayed_truth_confirmation",
+  "description": "BUY hedge verification is unknown on get_order, then confirmed by retry-sync position truth.",
+  "market": {
+    "condition_id": "market-delayed-truth",
+    "question": "Will retry sync confirm the hedge after a missing order lookup?",
+    "yes_token_id": "3001",
+    "no_token_id": "3002",
+    "daily_reward_total": "100",
+    "max_spread": "0.10",
+    "tick_size": "0.01"
+  },
+  "trigger": {
+    "work_item": {
+      "tracked_order": {
+        "order_id": "fill-order-delayed",
+        "trace_id": "trace-delayed-truth",
+        "leg": "YesBid",
+        "price": "0.74",
+        "size": "8",
+        "matched_size": "0"
+      },
+      "trade": {
+        "trade_id": "trade-delayed-truth",
+        "side": "BUY",
+        "price": "0.74",
+        "size": "8",
+        "maker_order_id": "fill-order-delayed"
+      },
+      "anchored_order_id": "fill-order-delayed",
+      "match_source": "maker_order_id",
+      "fallback_match": false,
+      "size_to_apply": "8",
+      "hedge_size": "8"
+    }
+  },
+  "exchange": {
+    "default_fee_rate_bps": 0,
+    "books": {
+      "yes": {
+        "bids": [["0.73", "20"]],
+        "asks": [["0.75", "20"]]
+      },
+      "no": {
+        "bids": [["0.24", "20"]],
+        "asks": [["0.26", "20"]]
+      }
+    },
+    "balances": [
+      {
+        "amount": "100"
+      }
+    ],
+    "positions": [
+      {
+        "yes_size": "0",
+        "no_size": "0"
+      }
+    ],
+    "global_open_orders": [
+      {
+        "orders": []
+      }
+    ],
+    "market_open_orders": [
+      {
+        "orders": []
+      }
+    ],
+    "actions": [
+      {
+        "kind": "place",
+        "expected_token_id": "3002",
+        "expected_side": "BUY",
+        "expected_order_type": "GTC",
+        "response": {
+          "order_id": "hedge-order-delayed",
+          "status": "live"
+        },
+        "mutations": {
+          "replace_balances": [
+            {
+              "amount": "97.84"
+            }
+          ],
+          "replace_positions": [
+            {
+              "yes_size": "8",
+              "no_size": "0"
+            },
+            {
+              "yes_size": "8",
+              "no_size": "8"
+            }
+          ],
+          "replace_order_lookup": [
+            {
+              "order_id": "hedge-order-delayed",
+              "responses": [
+                {}
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "kind": "cancel",
+        "expected_order_id": "hedge-order-delayed"
+      }
+    ]
+  },
+  "expected": {
+    "success": true,
+    "halted": false,
+    "hedge_side": "BUY",
+    "planned_hedge_shares": "8",
+    "result_status": "success",
+    "hedge_leg_status": "unverified",
+    "sellback_leg_status": "skipped",
+    "hedge_price": "0.27",
+    "post_sync_yes_size": "8",
+    "post_sync_no_size": "8",
+    "post_sync_net_exposure": "0",
+    "neutrality_residual_exposure": "0"
+  }
+}

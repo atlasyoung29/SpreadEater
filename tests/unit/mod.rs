@@ -1,0 +1,13 @@
+mod auth;
+mod books;
+mod config_tests;
+mod core;
+mod discovery;
+mod helpers;
+mod models;
+mod monitor;
+mod persistence;
+mod reporting;
+mod strategy;
+mod trading;
+mod watchdog;

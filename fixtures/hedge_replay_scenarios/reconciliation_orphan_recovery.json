@@ -1,0 +1,97 @@
+{
+  "name": "reconciliation_orphan_recovery",
+  "description": "Refresh orphan recovery detects one-sided position exposure with no tracked commitment and routes it through reconciliation.",
+  "market": {
+    "condition_id": "replay-orphan-recovery",
+    "question": "Will orphaned position recovery hedge correctly?",
+    "yes_token_id": "3301",
+    "no_token_id": "3302",
+    "daily_reward_total": "100",
+    "max_spread": "0.10",
+    "tick_size": "0.01"
+  },
+  "setup": {
+    "cached_balance": "100"
+  },
+  "sequence": [
+    { "kind": "recover_orphaned_positions" }
+  ],
+  "exchange": {
+    "default_fee_rate_bps": 0,
+    "books": {
+      "yes": { "bids": [["0.73", "20"]], "asks": [["0.75", "20"]] },
+      "no": { "bids": [["0.24", "20"]], "asks": [["0.26", "20"]] }
+    },
+    "balances": [{ "amount": "100" }],
+    "positions": [
+      { "yes_size": "10", "no_size": "0", "yes_avg_price": "0.74" },
+      { "yes_size": "10", "no_size": "0", "yes_avg_price": "0.74" },
+      { "yes_size": "10", "no_size": "0", "yes_avg_price": "0.74" },
+      { "yes_size": "10", "no_size": "10", "yes_avg_price": "0.74", "no_avg_price": "0.26" }
+    ],
+    "global_open_orders": [{ "orders": [] }],
+    "market_open_orders": [{ "orders": [] }],
+    "actions": [
+      {
+        "kind": "place",
+        "expected_token_id": "3302",
+        "expected_side": "BUY",
+        "expected_order_type": "GTC",
+        "response": { "order_id": "orphan-hedge-order", "status": "live" },
+        "mutations": {
+          "replace_balances": [{ "amount": "97.40" }],
+          "replace_positions": [{ "yes_size": "10", "no_size": "10", "yes_avg_price": "0.74", "no_avg_price": "0.26" }],
+          "replace_order_lookup": [
+            {
+              "order_id": "orphan-hedge-order",
+              "responses": [
+                {
+                  "order": {
+                    "id": "orphan-hedge-order",
+                    "leg": "NoBid",
+                    "price": "0.26",
+                    "original_size": "10",
+                    "size_matched": "10",
+                    "status": "live",
+                    "order_type": "GTC"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      { "kind": "cancel", "expected_order_id": "orphan-hedge-order" }
+    ]
+  },
+  "expected": {
+    "critical_events": [
+      {
+        "event_type": "fill_detected",
+        "source_component": "reconciliation_position_orphan",
+        "payload": {
+          "match_source": "reconciliation_position_orphan",
+          "fallback_match": true,
+          "anchored_order_id": "reconciliation"
+        }
+      },
+      {
+        "event_type": "hedge_intent_created",
+        "payload": {
+          "hedge_side": "BUY"
+        }
+      }
+    ],
+    "success": true,
+    "halted": false,
+    "hedge_side": "BUY",
+    "planned_hedge_shares": "10",
+    "result_status": "success",
+    "hedge_leg_status": "success",
+    "sellback_leg_status": "skipped",
+    "hedge_price": "0.27",
+    "post_sync_yes_size": "10",
+    "post_sync_no_size": "10",
+    "post_sync_net_exposure": "0"
+  }
+}

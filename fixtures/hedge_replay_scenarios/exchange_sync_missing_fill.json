@@ -1,0 +1,110 @@
+{
+  "name": "exchange_sync_missing_fill",
+  "description": "Quote refresh detects a matched-size delta from exchange truth and routes it through the exchange_order_sync fill path.",
+  "market": {
+    "condition_id": "replay-exchange-sync",
+    "question": "Will exchange order sync route missed fills into the hedge path?",
+    "yes_token_id": "3201",
+    "no_token_id": "3202",
+    "daily_reward_total": "100",
+    "max_spread": "0.10",
+    "tick_size": "0.01"
+  },
+  "setup": {
+    "tracked_orders": [
+      {
+        "order_id": "exchange-sync-order",
+        "trace_id": "trace-exchange-sync-order",
+        "leg": "YesBid",
+        "price": "0.74",
+        "size": "10",
+        "matched_size": "0"
+      }
+    ],
+    "cached_balance": "100"
+  },
+  "sequence": [
+    { "kind": "refresh_quotes" }
+  ],
+  "exchange": {
+    "default_fee_rate_bps": 0,
+    "books": {
+      "yes": { "bids": [["0.73", "20"]], "asks": [["0.75", "20"]] },
+      "no": { "bids": [["0.24", "20"]], "asks": [["0.26", "20"]] }
+    },
+    "balances": [{ "amount": "100" }],
+    "positions": [
+      { "yes_size": "10", "no_size": "0", "yes_avg_price": "0.74" },
+      { "yes_size": "10", "no_size": "10" }
+    ],
+    "global_open_orders": [
+      { "orders": [] }
+    ],
+    "market_open_orders": [
+      { "orders": [] }
+    ],
+    "actions": [
+      {
+        "kind": "place",
+        "expected_token_id": "3202",
+        "expected_side": "BUY",
+        "expected_order_type": "GTC",
+        "response": { "order_id": "exchange-sync-hedge", "status": "live" },
+        "mutations": {
+          "replace_balances": [{ "amount": "97.40" }],
+          "replace_positions": [{ "yes_size": "10", "no_size": "10" }],
+          "replace_order_lookup": [
+            {
+              "order_id": "exchange-sync-hedge",
+              "responses": [
+                {
+                  "order": {
+                    "id": "exchange-sync-hedge",
+                    "leg": "NoBid",
+                    "price": "0.26",
+                    "original_size": "10",
+                    "size_matched": "10",
+                    "status": "live",
+                    "order_type": "GTC"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      { "kind": "cancel", "expected_order_id": "exchange-sync-hedge" }
+    ]
+  },
+  "expected": {
+    "critical_events": [
+      {
+        "event_type": "fill_detected",
+        "source_component": "fill_handler",
+        "payload": {
+          "match_source": "exchange_order_sync",
+          "fallback_match": true,
+          "anchored_order_id": "exchange-sync-order"
+        }
+      },
+      {
+        "event_type": "hedge_intent_created",
+        "payload": {
+          "hedge_side": "BUY"
+        }
+      }
+    ],
+    "success": true,
+    "halted": false,
+    "hedge_side": "BUY",
+    "planned_hedge_shares": "10",
+    "result_status": "success",
+    "hedge_leg_status": "success",
+    "sellback_leg_status": "skipped",
+    "hedge_price": "0.27",
+    "post_sync_yes_size": "10",
+    "post_sync_no_size": "10",
+    "post_sync_net_exposure": "0",
+    "neutrality_residual_exposure": "0"
+  }
+}

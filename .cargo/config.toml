@@ -1,0 +1,4 @@
+[build]
+# target-dir is set via CARGO_TARGET_DIR env var in Windows scripts
+# (spaces in the default path break dlltool on Windows GNU toolchain)
+# Do NOT hardcode a Windows path here — it breaks Linux CI

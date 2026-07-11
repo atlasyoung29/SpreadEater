@@ -1,0 +1,1071 @@
+{
+    "title": "SpreadEater Monitor",
+    "version": "0.1",
+    "mvp_horizon": "MVP is a non-blocking domain event backbone, append-only event log, Postgres index, terminal operator view, and local live dashboard for SpreadEater.",
+    "problem": {
+        "summary": "SpreadEater needs a structured observability system that explains trading decisions and order lifecycles without forcing operators to reconstruct behavior from fragmented raw logs.",
+        "context": "The current bot already emits tracing logs and decision reports, but selection, sizing, cancellations, fills, hedges, and neutrality outcomes are not modeled as one correlated lifecycle. The new system must be local-first, performance-safe, and usable both live and post-run."
+    },
+    "goals": [
+        "Emit structured domain events for decision, order, fill, hedge, position, risk, and monitor-health activity.",
+        "Power a terminal operator view, append-only event logs plus Postgres index, and a separate local live dashboard from the same source of truth.",
+        "Allow operators to inspect market-level summaries and per-trade lifecycle traces.",
+        "Show expected and realized outcome metrics separately.",
+        "Make hedge neutrality an explicit audited state with before and after exposure snapshots.",
+        "Protect trading performance by keeping the producer path bounded and non-blocking."
+    ],
+    "non_goals": [
+        "Internet-facing multi-user monitoring in MVP.",
+        "Dependence on the dashboard being online for trading to continue.",
+        "Remote control plane behavior in MVP.",
+        "Changes to SpreadEater trading strategy logic.",
+        "Using the monitor as the legal or accounting system of record."
+    ],
+    "success_metrics": [
+        {
+            "metric": "Critical event identity completeness",
+            "target": "100% of critical lifecycle events include condition_id, market display name, run_id, timestamp, and correlation ID when applicable",
+            "notes": "Makes traces usable by humans and agents"
+        },
+        {
+            "metric": "Cancellation reason coverage",
+            "target": "100% of order cancellations and resizes carry a normalized reason code",
+            "notes": "Supports operational debugging"
+        },
+        {
+            "metric": "Fill to hedge trace linkage",
+            "target": "100% of tracked fills link to a hedge trace or explicit hedge failure trace",
+            "notes": "Covers hot-path auditability"
+        },
+        {
+            "metric": "Neutrality evaluation coverage",
+            "target": "100% of hedge traces record before and after exposure plus is_neutral verdict",
+            "notes": "Makes hedge integrity explicit"
+        },
+        {
+            "metric": "Producer enqueue overhead",
+            "target": "< 1 ms p95 on healthy local hardware",
+            "notes": "Protects trading performance"
+        },
+        {
+            "metric": "Critical event durability latency",
+            "target": "< 250 ms p95 to local event log on healthy local disk",
+            "notes": "Applies to critical and high priority events"
+        },
+        {
+            "metric": "UI freshness",
+            "target": "< 1 second p95 from event occurrence to terminal or dashboard render",
+            "notes": "Local live visibility target"
+        },
+        {
+            "metric": "Trading isolation",
+            "target": "0 trading path blocks caused by monitor app or Postgres outages in normal failure tests",
+            "notes": "Observer failures must degrade safely"
+        }
+    ],
+    "personas": [
+        {
+            "name": "Owner-Operator",
+            "job_to_be_done": "Run SpreadEater locally and understand live behavior quickly during trading.",
+            "pain_points": [
+                "Current logs are fragmented and hard to mentally reconstruct",
+                "Open capital and hedge state are hard to track live",
+                "Cancellation reasons and risk transitions are difficult to audit"
+            ]
+        },
+        {
+            "name": "Strategy Researcher",
+            "job_to_be_done": "Review runs after the fact and compare expected decision quality against realized execution quality.",
+            "pain_points": [
+                "Decision archives do not cover the full live lifecycle",
+                "Expected and realized economics are not presented together",
+                "Filtering and exporting relevant traces is cumbersome"
+            ]
+        },
+        {
+            "name": "AI Auditor",
+            "job_to_be_done": "Consume deterministic machine-readable traces to debug behavior and guide implementation changes.",
+            "pain_points": [
+                "Raw human-readable logs are expensive to parse",
+                "Stable reason codes and correlation IDs are missing across events",
+                "Current outputs do not form one auditable lifecycle object"
+            ]
+        }
+    ],
+    "scope": {
+        "in": [
+            "Shared domain event contracts in the monorepo",
+            "Prioritized non-blocking producer inside SpreadEater",
+            "Append-only local event logs as durable source of truth",
+            "Separate monitor app that ingests logs and materializes Postgres projections",
+            "Terminal operator view",
+            "Local read-only live dashboard",
+            "Search, filtering, and export for runs, markets, traces, orders, and hedges",
+            "Expected and realized yield or edge metrics",
+            "Explicit hedge neutrality evaluation"
+        ],
+        "out": [
+            "Internet-facing hosting",
+            "Multi-user auth and RBAC",
+            "Third-party alerting integrations in MVP",
+            "Operator control actions from the UI in MVP",
+            "Trading strategy rewrites",
+            "Replacing event logs with DB-only persistence"
+        ]
+    },
+    "journeys": [
+        {
+            "name": "Understand market selection",
+            "steps": [
+                "Open the terminal view or dashboard",
+                "Inspect active and recently evaluated markets with names, IDs, expected edge, expected yield, and status",
+                "Select a market",
+                "Review candidate quote legs, approved or rejected status, hedgeability, dynamic size, and reasons"
+            ],
+            "edge_cases": [
+                "Market rejected due to hedgeability failure",
+                "Market rejected due to reward viability failure",
+                "Market halted by risk controls",
+                "Market removed after reward eligibility changes"
+            ]
+        },
+        {
+            "name": "Follow one trade lifecycle",
+            "steps": [
+                "Select a trace by trace ID, order ID, or fill event",
+                "Review decision, order placement, resize or cancel activity, fill detection, hedge intent, hedge execution, and neutrality evaluation",
+                "Inspect before and after exposure and complete sets",
+                "Export the trace if needed"
+            ],
+            "edge_cases": [
+                "Fallback fill matching on missing order IDs",
+                "Cancel-replace race with recently cancelled orders",
+                "Hedge failure and kill switch",
+                "Reconciliation hedge after downtime or reconnect gap"
+            ]
+        },
+        {
+            "name": "Explain cancellations and resizes",
+            "steps": [
+                "Filter to cancellation or resize events",
+                "Group them by reason code",
+                "Inspect the old order, replacement order, size delta, and capital delta"
+            ],
+            "edge_cases": [
+                "Quote drift cancel-replace",
+                "Hedge depth below minimum size",
+                "Hedge depth partial downsize",
+                "Market de-admitted",
+                "Risk halt or external cancel"
+            ]
+        },
+        {
+            "name": "Audit expected versus realized outcome",
+            "steps": [
+                "Open a run or specific trace",
+                "Review expected reward, expected hedge cost, expected edge, expected edge percent, committed capital, fills, hedges, and realized post-hedge state",
+                "Compare decision quality to execution quality"
+            ],
+            "edge_cases": [
+                "Expected positive edge but hedge failed",
+                "Expected edge was positive but realized outcome degraded",
+                "Inventory is neutral but exit asks remain open"
+            ]
+        }
+    ],
+    "functional_requirements": [
+        {
+            "epic": "Domain event backbone",
+            "stories": [
+                {
+                    "id": "FR-1",
+                    "story": "SpreadEater MUST emit every monitoring event in one canonical envelope.",
+                    "acceptance_criteria": [
+                        "Given any emitted event, when serialized, then it includes event_id, schema_version, event_type, priority, occurred_at, run_id, source_component, and mode.",
+                        "Given any market-linked event, when serialized, then it includes condition_id, market_slug, and question.",
+                        "Given any trace-linked event, when serialized, then it includes trace_id and parent linkage when applicable."
+                    ],
+                    "priority": "P0",
+                    "notes": "Makes all consumers read one schema family"
+                },
+                {
+                    "id": "FR-2",
+                    "story": "The event backbone MUST cover decision, order, fill, hedge, position, risk, and monitor-health events.",
+                    "acceptance_criteria": [
+                        "Given a market evaluation, when completed, then a decision event is emitted with quote candidates, reasons, and expected metrics.",
+                        "Given order lifecycle activity, when it occurs, then placement, update, resize, cancellation, and failure events are emitted.",
+                        "Given fill or hedge lifecycle activity, when it occurs, then fill, hedge intent, hedge result, and reconciliation events are emitted."
+                    ],
+                    "priority": "P0",
+                    "notes": "Core coverage set"
+                },
+                {
+                    "id": "FR-3",
+                    "story": "The system MUST correlate one decision-to-order-to-fill-to-hedge lifecycle as a trace.",
+                    "acceptance_criteria": [
+                        "Given a newly approved quote, when the first order is created, then a trace ID is assigned or propagated.",
+                        "Given subsequent events for that lifecycle, when emitted, then they reference the same trace ID.",
+                        "Given one market has multiple simultaneous lifecycles, when queried, then each lifecycle is independently inspectable."
+                    ],
+                    "priority": "P0",
+                    "notes": "Trade lifecycle trace is the primary audit unit"
+                },
+                {
+                    "id": "FR-4",
+                    "story": "SpreadEater MUST emit monitoring events through a prioritized non-blocking producer path.",
+                    "acceptance_criteria": [
+                        "Given normal operation, when events are emitted, then enqueue is non-blocking and bounded.",
+                        "Given temporary overload, when low-priority status events accumulate, then they may be coalesced or dropped before critical events.",
+                        "Given observer or DB failure, when trading continues, then the bot remains operational and emits a monitor-degraded signal."
+                    ],
+                    "priority": "P0",
+                    "notes": "Protect trading latency first"
+                }
+            ]
+        },
+        {
+            "epic": "Durable capture and indexing",
+            "stories": [
+                {
+                    "id": "FR-5",
+                    "story": "The bot MUST durably write append-only local event logs that act as the source of truth.",
+                    "acceptance_criteria": [
+                        "Given emitted events, when flushed, then they are written as append-only structured records partitioned by run or time bucket.",
+                        "Given a restart, when a new run begins, then a new run or session context is created without corrupting prior logs.",
+                        "Given later analysis, when rebuilding projections, then the event logs are sufficient to replay index state."
+                    ],
+                    "priority": "P0",
+                    "notes": "Durability without DB dependence"
+                },
+                {
+                    "id": "FR-6",
+                    "story": "The monitor app MUST materialize Postgres projections for fast querying and UI reads.",
+                    "acceptance_criteria": [
+                        "Given new event logs, when ingested, then normalized tables for runs, markets, traces, orders, hedges, cancellations, and positions are updated.",
+                        "Given duplicate ingestion, when replayed, then projection updates are idempotent.",
+                        "Given a live UI query, when executed, then it reads from projections rather than raw bot logs."
+                    ],
+                    "priority": "P0",
+                    "notes": "Postgres chosen for first indexed store"
+                },
+                {
+                    "id": "FR-7",
+                    "story": "The monitor app MUST be able to rebuild its Postgres index from event logs.",
+                    "acceptance_criteria": [
+                        "Given a fresh or corrupted index, when rebuild is triggered, then the monitor recreates projections from stored event logs.",
+                        "Given partial ingestion progress, when resumed, then processing continues deterministically.",
+                        "Given a completed rebuild, when compared to prior output, then trace and market summaries are consistent."
+                    ],
+                    "priority": "P1",
+                    "notes": "Supports recovery and schema evolution"
+                }
+            ]
+        },
+        {
+            "epic": "Operator surfaces",
+            "stories": [
+                {
+                    "id": "FR-8",
+                    "story": "The monitor MUST provide a terminal-first operator view optimized for live trading.",
+                    "acceptance_criteria": [
+                        "Given a live session, when the terminal view is opened, then it shows run health, lag, capital, active markets, open orders, unhedged markets, and recent critical events.",
+                        "Given a selected market, when inspected, then it shows market name, IDs, approved or rejected reasons, expected metrics, current orders, and current positions.",
+                        "Given a selected trace, when inspected, then the operator can follow decision, order, fill, hedge, and reconciliation events in order."
+                    ],
+                    "priority": "P0",
+                    "notes": "Primary live operator surface"
+                },
+                {
+                    "id": "FR-9",
+                    "story": "The monitor MUST provide a local read-only browser dashboard for live visibility.",
+                    "acceptance_criteria": [
+                        "Given the monitor app is running, when the operator opens localhost, then overview, market detail, trace detail, and health views are available.",
+                        "Given live events arrive, when the dashboard is open, then updates appear within the defined freshness target.",
+                        "Given the dashboard is not open, when the bot runs, then trading behavior is unchanged."
+                    ],
+                    "priority": "P1",
+                    "notes": "Secondary live surface in MVP"
+                },
+                {
+                    "id": "FR-10",
+                    "story": "The monitor MUST support search, filtering, and export for targeted debugging and audit.",
+                    "acceptance_criteria": [
+                        "Given a query by market, order ID, trace ID, or reason code, when executed, then matching data is returned.",
+                        "Given a filtered timeline, when exported, then the output is machine-readable.",
+                        "Given an AI or human audit flow, when reading data, then all event payloads and normalized fields are available."
+                    ],
+                    "priority": "P1",
+                    "notes": "Supports post-run analysis"
+                }
+            ]
+        },
+        {
+            "epic": "Strategy audit semantics",
+            "stories": [
+                {
+                    "id": "FR-11",
+                    "story": "The monitor MUST explain why a market or order was selected and what the expected economics were.",
+                    "acceptance_criteria": [
+                        "Given a market evaluation, when recorded, then the event includes candidate quote legs, approved and rejected statuses, reasons, effective quote size, score share, expected reward, expected hedge cost, expected edge, and expected edge percent.",
+                        "Given capital is committed, when displayed, then open order notional and position notional are shown.",
+                        "Given expected metrics are shown, when rendered, then USD and percentage values are both available."
+                    ],
+                    "priority": "P0",
+                    "notes": "Answers market selection and size questions"
+                },
+                {
+                    "id": "FR-12",
+                    "story": "The monitor MUST normalize cancellation and resize reasons.",
+                    "acceptance_criteria": [
+                        "Given any cancellation or resize, when recorded, then a reason code is attached from a stable taxonomy.",
+                        "Given a cancellation reason, when displayed, then the UI shows both a short code and a human-readable explanation.",
+                        "Given a replace flow, when inspected, then old order ID and replacement order ID are linked."
+                    ],
+                    "priority": "P0",
+                    "notes": "Covers drift, hedge depth, risk, de-admission, external cancel, and related reasons"
+                },
+                {
+                    "id": "FR-13",
+                    "story": "The monitor MUST record hedge outcome as an auditable lifecycle with reconciled neutrality status.",
+                    "acceptance_criteria": [
+                        "Given a fill on a tracked order, when hedge intent is created, then trigger details, target hedge instrument, and fill size are recorded.",
+                        "Given hedge execution completes or fails, when recorded, then the result includes order outcome, failure reason if any, and timing.",
+                        "Given post-hedge positions are synced, when evaluated, then the system records pre-state, post-state, residual exposure, complete-set size, tolerance, and is_neutral."
+                    ],
+                    "priority": "P0",
+                    "notes": "Inventory-neutral plus reconciled is the success criterion"
+                },
+                {
+                    "id": "FR-14",
+                    "story": "The monitor MUST show how much money is in open orders, inventory, and hedged positions.",
+                    "acceptance_criteria": [
+                        "Given live tracked orders, when summarized, then open order notional is shown by market and globally.",
+                        "Given inventory exists, when summarized, then YES size, NO size, net exposure, and complete sets are shown.",
+                        "Given a market is fully hedged, when displayed, then the total paired size in the hedged market is shown."
+                    ],
+                    "priority": "P0",
+                    "notes": "Covers open capital and paired inventory"
+                }
+            ]
+        },
+        {
+            "epic": "Integration and compatibility",
+            "stories": [
+                {
+                    "id": "FR-15",
+                    "story": "The new monitoring system MUST coexist with current logs and archive outputs during rollout.",
+                    "acceptance_criteria": [
+                        "Given the new monitor is enabled, when the bot logs, then human-readable logs remain concise and may reference trace IDs instead of repeating full detail.",
+                        "Given existing decision reports are still needed, when generated, then they may be preserved as derived outputs from the new event model.",
+                        "Given the monitor is disabled by config, when the bot runs, then existing trading behavior remains intact."
+                    ],
+                    "priority": "P1",
+                    "notes": "Supports gradual adoption"
+                }
+            ]
+        }
+    ],
+    "nonfunctional_requirements": [
+        {
+            "id": "NFR-1",
+            "requirement": "The producer path MUST be bounded and non-blocking for trading-critical code paths.",
+            "priority": "P0"
+        },
+        {
+            "id": "NFR-2",
+            "requirement": "Trading MUST continue when the monitor app, dashboard, or Postgres index is unavailable.",
+            "priority": "P0"
+        },
+        {
+            "id": "NFR-3",
+            "requirement": "Critical events SHOULD flush to local event logs within 250 ms p95 on healthy local hardware.",
+            "priority": "P0"
+        },
+        {
+            "id": "NFR-4",
+            "requirement": "Terminal and dashboard freshness SHOULD stay under 1 second p95 from event occurrence to render.",
+            "priority": "P1"
+        },
+        {
+            "id": "NFR-5",
+            "requirement": "Event payloads MUST NOT include private keys, API secrets, passphrases, or raw auth headers.",
+            "priority": "P0"
+        },
+        {
+            "id": "NFR-6",
+            "requirement": "Event schemas MUST be versioned and backward-compatible within one minor version.",
+            "priority": "P0"
+        },
+        {
+            "id": "NFR-7",
+            "requirement": "Projection rebuild from logs MUST be deterministic and idempotent.",
+            "priority": "P1"
+        },
+        {
+            "id": "NFR-8",
+            "requirement": "The dashboard MUST bind to localhost by default and require explicit opt-in for non-local exposure.",
+            "priority": "P1"
+        },
+        {
+            "id": "NFR-9",
+            "requirement": "The operator surfaces SHOULD support keyboard navigation and high-contrast readable states.",
+            "priority": "P1"
+        },
+        {
+            "id": "NFR-10",
+            "requirement": "The implementation SHOULD remain portable across local developer environments used by SpreadEater.",
+            "priority": "P1"
+        }
+    ],
+    "data_model": [
+        {
+            "entity": "EventEnvelope",
+            "fields": [
+                {
+                    "name": "event_id",
+                    "type": "uuid",
+                    "notes": "Unique event identifier"
+                },
+                {
+                    "name": "schema_version",
+                    "type": "string",
+                    "notes": "Versioned contract for consumers"
+                },
+                {
+                    "name": "event_type",
+                    "type": "string",
+                    "notes": "Canonical domain event name"
+                },
+                {
+                    "name": "priority",
+                    "type": "string",
+                    "notes": "critical, high, normal, or debug"
+                },
+                {
+                    "name": "occurred_at",
+                    "type": "timestamp",
+                    "notes": "When the source event happened"
+                },
+                {
+                    "name": "recorded_at",
+                    "type": "timestamp",
+                    "notes": "When the event was serialized or flushed"
+                },
+                {
+                    "name": "run_id",
+                    "type": "string",
+                    "notes": "Bot process session identifier"
+                },
+                {
+                    "name": "cycle_id",
+                    "type": "string?",
+                    "notes": "Discovery or refresh cycle if applicable"
+                },
+                {
+                    "name": "trace_id",
+                    "type": "string?",
+                    "notes": "Lifecycle correlation identifier"
+                },
+                {
+                    "name": "source_component",
+                    "type": "string",
+                    "notes": "Discovery, order manager, hedge executor, risk manager, and so on"
+                },
+                {
+                    "name": "mode",
+                    "type": "string",
+                    "notes": "shadow, dry-run, or live"
+                },
+                {
+                    "name": "condition_id",
+                    "type": "string?",
+                    "notes": "Canonical market identifier"
+                },
+                {
+                    "name": "market_slug",
+                    "type": "string?",
+                    "notes": "Human-friendly market slug"
+                },
+                {
+                    "name": "question",
+                    "type": "string?",
+                    "notes": "Display name for operator readability"
+                },
+                {
+                    "name": "order_id",
+                    "type": "string?",
+                    "notes": "Order linkage when relevant"
+                },
+                {
+                    "name": "asset_id",
+                    "type": "string?",
+                    "notes": "Token linkage when relevant"
+                },
+                {
+                    "name": "hedge_id",
+                    "type": "string?",
+                    "notes": "Hedge lifecycle linkage when relevant"
+                },
+                {
+                    "name": "payload",
+                    "type": "jsonb",
+                    "notes": "Event-specific structured content"
+                }
+            ]
+        },
+        {
+            "entity": "DecisionEventPayload",
+            "fields": [
+                {
+                    "name": "candidate_quotes",
+                    "type": "array",
+                    "notes": "Quote legs with prices, sizes, and statuses"
+                },
+                {
+                    "name": "reasons",
+                    "type": "array<string>",
+                    "notes": "Approved and rejected reasoning"
+                },
+                {
+                    "name": "effective_quote_size",
+                    "type": "decimal",
+                    "notes": "Dynamic size used for evaluation"
+                },
+                {
+                    "name": "expected_reward_usd_day",
+                    "type": "decimal",
+                    "notes": "Estimated reward opportunity"
+                },
+                {
+                    "name": "expected_hedge_cost_usd",
+                    "type": "decimal",
+                    "notes": "Estimated hedge cost"
+                },
+                {
+                    "name": "expected_edge_usd",
+                    "type": "decimal",
+                    "notes": "Net expected edge"
+                },
+                {
+                    "name": "expected_edge_pct",
+                    "type": "decimal",
+                    "notes": "Expected edge over committed capital"
+                },
+                {
+                    "name": "committed_capital_usd",
+                    "type": "decimal",
+                    "notes": "Capital basis for percentages"
+                },
+                {
+                    "name": "score_share",
+                    "type": "decimal",
+                    "notes": "Estimated reward share"
+                },
+                {
+                    "name": "max_hedgeable_size",
+                    "type": "decimal",
+                    "notes": "Maximum immediately hedgeable size"
+                }
+            ]
+        },
+        {
+            "entity": "OrderLifecycleProjection",
+            "fields": [
+                {
+                    "name": "order_id",
+                    "type": "string",
+                    "notes": "Primary order identifier"
+                },
+                {
+                    "name": "trace_id",
+                    "type": "string",
+                    "notes": "Lifecycle linkage"
+                },
+                {
+                    "name": "leg",
+                    "type": "string",
+                    "notes": "YES bid, YES ask, NO bid, or NO ask"
+                },
+                {
+                    "name": "price",
+                    "type": "decimal",
+                    "notes": "Placed or updated price"
+                },
+                {
+                    "name": "size",
+                    "type": "decimal",
+                    "notes": "Placed or updated size"
+                },
+                {
+                    "name": "matched_size",
+                    "type": "decimal",
+                    "notes": "Filled amount"
+                },
+                {
+                    "name": "state",
+                    "type": "string",
+                    "notes": "Live, matched, cancelled, invalid, and related states"
+                },
+                {
+                    "name": "cancel_reason_code",
+                    "type": "string?",
+                    "notes": "Normalized reason taxonomy"
+                },
+                {
+                    "name": "replacement_order_id",
+                    "type": "string?",
+                    "notes": "Link to replacement order on resize or cancel-replace"
+                },
+                {
+                    "name": "committed_capital_delta_usd",
+                    "type": "decimal",
+                    "notes": "Capital effect of this order change"
+                }
+            ]
+        },
+        {
+            "entity": "HedgeLifecycleProjection",
+            "fields": [
+                {
+                    "name": "hedge_id",
+                    "type": "string",
+                    "notes": "Hedge lifecycle identifier"
+                },
+                {
+                    "name": "trace_id",
+                    "type": "string",
+                    "notes": "Links back to originating lifecycle"
+                },
+                {
+                    "name": "trigger_order_id",
+                    "type": "string",
+                    "notes": "Order that led to hedge intent"
+                },
+                {
+                    "name": "fill_size",
+                    "type": "decimal",
+                    "notes": "Trigger fill size"
+                },
+                {
+                    "name": "fill_price",
+                    "type": "decimal",
+                    "notes": "Trigger fill price"
+                },
+                {
+                    "name": "hedge_token_id",
+                    "type": "string",
+                    "notes": "Target hedge instrument"
+                },
+                {
+                    "name": "hedge_side",
+                    "type": "string",
+                    "notes": "BUY or SELL"
+                },
+                {
+                    "name": "hedge_order_id",
+                    "type": "string?",
+                    "notes": "Actual hedge order identifier when placed"
+                },
+                {
+                    "name": "result_status",
+                    "type": "string",
+                    "notes": "Accepted, failed, reconciled, or related status"
+                },
+                {
+                    "name": "failure_reason",
+                    "type": "string?",
+                    "notes": "Structured failure detail"
+                }
+            ]
+        },
+        {
+            "entity": "NeutralityEvaluation",
+            "fields": [
+                {
+                    "name": "trace_id",
+                    "type": "string",
+                    "notes": "Lifecycle linkage"
+                },
+                {
+                    "name": "pre_yes_size",
+                    "type": "decimal",
+                    "notes": "Position before hedge"
+                },
+                {
+                    "name": "pre_no_size",
+                    "type": "decimal",
+                    "notes": "Position before hedge"
+                },
+                {
+                    "name": "post_yes_size",
+                    "type": "decimal",
+                    "notes": "Position after hedge and reconciliation"
+                },
+                {
+                    "name": "post_no_size",
+                    "type": "decimal",
+                    "notes": "Position after hedge and reconciliation"
+                },
+                {
+                    "name": "residual_exposure",
+                    "type": "decimal",
+                    "notes": "Net exposure after reconciliation"
+                },
+                {
+                    "name": "complete_sets",
+                    "type": "decimal",
+                    "notes": "Paired inventory in the market"
+                },
+                {
+                    "name": "tolerance",
+                    "type": "decimal",
+                    "notes": "Configured neutrality tolerance"
+                },
+                {
+                    "name": "is_neutral",
+                    "type": "boolean",
+                    "notes": "Inventory-neutral plus reconciled verdict"
+                }
+            ]
+        },
+        {
+            "entity": "RunProjection",
+            "fields": [
+                {
+                    "name": "run_id",
+                    "type": "string",
+                    "notes": "Bot process session identifier"
+                },
+                {
+                    "name": "mode",
+                    "type": "string",
+                    "notes": "shadow, dry-run, or live"
+                },
+                {
+                    "name": "started_at",
+                    "type": "timestamp",
+                    "notes": "Run start time"
+                },
+                {
+                    "name": "ended_at",
+                    "type": "timestamp?",
+                    "notes": "Run end time"
+                },
+                {
+                    "name": "observer_health",
+                    "type": "string",
+                    "notes": "healthy, lagging, degraded, or rebuilding"
+                },
+                {
+                    "name": "producer_lag_ms",
+                    "type": "integer",
+                    "notes": "Producer-side observability lag"
+                },
+                {
+                    "name": "index_lag_ms",
+                    "type": "integer",
+                    "notes": "Projection catch-up lag"
+                }
+            ]
+        }
+    ],
+    "apis": [
+        {
+            "name": "Overview",
+            "method": "GET",
+            "path": "/api/v1/overview",
+            "request": {},
+            "response": {
+                "run_id": "run_20260308_153000",
+                "mode": "live",
+                "observer_health": "healthy",
+                "producer_lag_ms": 12,
+                "index_lag_ms": 84,
+                "active_markets": 6,
+                "open_orders": 10,
+                "committed_capital_usd": "342.50",
+                "unhedged_markets": 0
+            },
+            "errors": [
+                "503 monitor not initialized",
+                "500 projection query failed"
+            ]
+        },
+        {
+            "name": "Market Detail",
+            "method": "GET",
+            "path": "/api/v1/markets/{condition_id}",
+            "request": {
+                "include_timeline": true
+            },
+            "response": {
+                "condition_id": "0xabc",
+                "market_slug": "election-example",
+                "question": "Will example happen?",
+                "decision_status": "approved",
+                "expected_edge_usd": "1.42",
+                "expected_edge_pct": "0.41",
+                "expected_reward_usd_day": "2.05",
+                "open_order_notional_usd": "88.00",
+                "yes_size": "44",
+                "no_size": "44",
+                "net_exposure": "0",
+                "is_neutral": true,
+                "recent_events": []
+            },
+            "errors": [
+                "404 market not found",
+                "500 projection query failed"
+            ]
+        },
+        {
+            "name": "Trace Detail",
+            "method": "GET",
+            "path": "/api/v1/traces/{trace_id}",
+            "request": {},
+            "response": {
+                "trace_id": "trace_01H",
+                "market": {
+                    "condition_id": "0xabc",
+                    "market_slug": "election-example",
+                    "question": "Will example happen?"
+                },
+                "decision": {},
+                "orders": [],
+                "fills": [],
+                "hedges": [],
+                "neutrality": {
+                    "is_neutral": true,
+                    "residual_exposure": "0",
+                    "complete_sets": "44",
+                    "tolerance": "0.001"
+                }
+            },
+            "errors": [
+                "404 trace not found",
+                "500 projection query failed"
+            ]
+        },
+        {
+            "name": "Filtered Events",
+            "method": "GET",
+            "path": "/api/v1/events",
+            "request": {
+                "trace_id": "trace_01H",
+                "event_type": "order_cancelled",
+                "limit": 200
+            },
+            "response": {
+                "items": [],
+                "next_cursor": null
+            },
+            "errors": [
+                "400 invalid filter",
+                "500 projection query failed"
+            ]
+        },
+        {
+            "name": "Live Stream",
+            "method": "GET",
+            "path": "/ws/live",
+            "request": {},
+            "response": {
+                "channel": "overview|market|trace|alerts",
+                "data": {}
+            },
+            "errors": [
+                "503 live stream unavailable"
+            ]
+        }
+    ],
+    "analytics": [
+        {
+            "event": "decision_evaluated",
+            "trigger": "A market evaluation completes",
+            "properties": [
+                "run_id",
+                "condition_id",
+                "market_slug",
+                "decision_status",
+                "expected_edge_usd",
+                "expected_edge_pct",
+                "max_hedgeable_size",
+                "reasons"
+            ]
+        },
+        {
+            "event": "quote_approved",
+            "trigger": "A quote leg is approved",
+            "properties": [
+                "trace_id",
+                "condition_id",
+                "leg",
+                "price",
+                "size",
+                "committed_capital_usd"
+            ]
+        },
+        {
+            "event": "quote_rejected",
+            "trigger": "A quote leg is rejected",
+            "properties": [
+                "trace_id",
+                "condition_id",
+                "leg",
+                "reason_code",
+                "reason_text"
+            ]
+        },
+        {
+            "event": "order_submitted",
+            "trigger": "A passive or hedge order submission succeeds",
+            "properties": [
+                "trace_id",
+                "order_id",
+                "condition_id",
+                "leg",
+                "side",
+                "price",
+                "size"
+            ]
+        },
+        {
+            "event": "order_resized",
+            "trigger": "An order is resized or replaced",
+            "properties": [
+                "trace_id",
+                "old_order_id",
+                "new_order_id",
+                "old_size",
+                "new_size",
+                "reason_code"
+            ]
+        },
+        {
+            "event": "order_cancelled",
+            "trigger": "An order is cancelled or removed from management",
+            "properties": [
+                "trace_id",
+                "order_id",
+                "condition_id",
+                "reason_code",
+                "reason_text"
+            ]
+        },
+        {
+            "event": "fill_detected",
+            "trigger": "A tracked fill event is matched",
+            "properties": [
+                "trace_id",
+                "order_id",
+                "trade_id",
+                "fill_price",
+                "fill_size",
+                "fallback_match"
+            ]
+        },
+        {
+            "event": "hedge_intent_created",
+            "trigger": "A fill creates a hedge intent",
+            "properties": [
+                "trace_id",
+                "trigger_order_id",
+                "condition_id",
+                "fill_size",
+                "fill_price",
+                "hedge_token_id",
+                "hedge_side"
+            ]
+        },
+        {
+            "event": "hedge_result_recorded",
+            "trigger": "A hedge execution succeeds or fails",
+            "properties": [
+                "trace_id",
+                "hedge_order_id",
+                "result_status",
+                "failure_reason",
+                "latency_ms"
+            ]
+        },
+        {
+            "event": "neutrality_evaluated",
+            "trigger": "Post-hedge positions are reconciled and evaluated",
+            "properties": [
+                "trace_id",
+                "pre_yes_size",
+                "pre_no_size",
+                "post_yes_size",
+                "post_no_size",
+                "residual_exposure",
+                "complete_sets",
+                "is_neutral"
+            ]
+        },
+        {
+            "event": "monitor_degraded",
+            "trigger": "The producer, log writer, ingest, or DB projection path enters a degraded state",
+            "properties": [
+                "run_id",
+                "component",
+                "degraded_reason",
+                "queue_depth",
+                "index_lag_ms"
+            ]
+        },
+        {
+            "event": "projection_rebuilt",
+            "trigger": "The Postgres projection store is rebuilt from event logs",
+            "properties": [
+                "rebuild_id",
+                "run_id",
+                "events_processed",
+                "duration_ms",
+                "status"
+            ]
+        }
+    ],
+    "risks": [
+        {
+            "risk": "Event volume spikes overwhelm low-priority rendering paths",
+            "impact": "Terminal and dashboard views lag or omit useful context",
+            "mitigation": "Use priority classes, bounded queues, coalescing of low-value status events, and explicit lag metrics"
+        },
+        {
+            "risk": "Schema churn breaks consumers or rebuilds",
+            "impact": "Monitor app and stored data drift apart",
+            "mitigation": "Version event schemas, keep backward-compatible minor revisions, and validate replay or rebuild in CI"
+        },
+        {
+            "risk": "Realized yield or PnL formulas become misleading",
+            "impact": "Operators make incorrect decisions from the monitor",
+            "mitigation": "Define explicit formulas, label expected versus realized separately, and keep extension points for later inventory exit accounting"
+        },
+        {
+            "risk": "Position sync lag delays neutrality verdicts",
+            "impact": "Hedge status appears uncertain or incorrect for short periods",
+            "mitigation": "Record both execution result and reconciled neutrality result as separate states with timestamps"
+        },
+        {
+            "risk": "Local Postgres introduces operational overhead",
+            "impact": "The monitor app becomes harder to run or recover",
+            "mitigation": "Keep event logs as source of truth, make projections rebuildable, and allow the bot to continue without Postgres"
+        }
+    ],
+    "open_questions": [
+        "Should the monitor eventually support operator actions such as halt, cancel, or acknowledge?",
+        "What retention and pruning policy should become the long-term default after real usage patterns are observed?",
+        "Should existing decision report JSON files remain first-class outputs or become fully derived artifacts from the event stream?",
+        "How should realized yield be extended once inventory exit and redemption flows are fully accounted for?"
+    ],
+    "assumptions": [
+        "The monitor app will live in the same monorepo as a separate app and process.",
+        "Event logs are the durable source of truth and Postgres is a rebuildable read model.",
+        "Access is local single-operator only in MVP.",
+        "Expected edge percent is defined as expected_edge_usd divided by committed_capital_usd times 100.",
+        "Realized outcome percent is defined as realized_pnl_usd divided by committed_capital_usd times 100 for the traced lifecycle.",
+        "Neutrality tolerance defaults to 0.001 until a stricter market-driven unit is introduced.",
+        "Low-priority status events may be coalesced under load while critical lifecycle events are prioritized.",
+        "The dashboard is read-only in MVP."
+    ]
+}

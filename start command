@@ -1,0 +1,5 @@
+cargo run -- live
+
+
+Stop-Process -Name spreadeater -Force -ErrorAction SilentlyContinue
+cargo run -- live

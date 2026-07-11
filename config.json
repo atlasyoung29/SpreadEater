@@ -1,0 +1,67 @@
+{
+  "mode": "Live",
+  "discovery": {
+    "min_daily_reward": "10",
+    "poll_interval_secs": 61,
+    "clob_base_url": "https://clob.polymarket.com",
+    "gamma_base_url": "https://gamma-api.polymarket.com",
+    "data_api_base_url": "https://data-api.polymarket.com"
+  },
+  "books": {
+    "ws_url": "wss://ws-subscriptions-clob.polymarket.com/ws/market",
+    "max_book_age_secs": 30,
+    "resync_interval_secs": 60
+  },
+  "strategy": {
+    "bid_depth_pct": "0.50",
+    "ask_depth_pct": "0.20",
+    "quote_drift_bps": "30",
+    "quote_refresh_secs": 5,
+    "min_edge_threshold": "0.01",
+    "min_est_daily": "0.25",
+    "min_outcome_price": "0.20",
+    "default_quote_size": "5",
+    "max_hedge_cost_bps": "80",
+    "max_slippage_bps": "80",
+    "min_frontier_improvement": "0.05",
+    "frontier_handoff_window_secs": 5,
+    "score_proxy": {
+      "competition_multiplier": "1.5",
+      "max_score_share": "0.25",
+      "min_score_share": "0.0001",
+      "target_score_share": "0.10",
+      "calibration_sample_size": 10
+    }
+  },
+  "risk": {
+    "hedge_timeout_secs": 10,
+    "cash_reserve": "10"
+  },
+  "persistence": {
+    "database_url": null,
+    "archive_dir": "./data/archive"
+  },
+  "observability": {
+    "enabled": true,
+    "event_log_dir": "./data/events"
+  },
+  "watchdog": {
+    "enabled": true,
+    "enforce_actions": false,
+    "max_book_ws_silence_secs": 60,
+    "max_user_ws_silence_secs": 120,
+    "max_reconnects_in_window": 5,
+    "reconnect_window_secs": 300,
+    "max_consecutive_disconnects": 3,
+    "degraded_timeout_secs": 120,
+    "kill_confirmation_delay_secs": 10,
+    "status_poll_interval_secs": 30,
+    "status_page_url": "https://status.polymarket.com/summary.json",
+    "critical_components": [
+      "CLOB API",
+      "Polygon (RPC)"
+    ],
+    "heartbeat_file": "./data/watchdog_heartbeat",
+    "kill_flatten_script": "scripts/kill_flatten.py"
+  }
+}

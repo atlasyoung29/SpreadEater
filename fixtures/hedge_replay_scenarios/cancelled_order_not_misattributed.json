@@ -1,0 +1,67 @@
+{
+  "name": "cancelled_order_not_misattributed",
+  "description": "A later large trade does not anchor to a tiny recently cancelled order and is deferred instead of misattributed.",
+  "market": {
+    "condition_id": "replay-cancelled-not-misattributed",
+    "question": "Will cancelled-order regression remain deferred instead of misattributed?",
+    "yes_token_id": "3401",
+    "no_token_id": "3402",
+    "daily_reward_total": "100",
+    "max_spread": "0.10",
+    "tick_size": "0.01"
+  },
+  "setup": {
+    "recently_cancelled_orders": [
+      {
+        "order_id": "tiny-cancelled-order",
+        "trace_id": "trace-tiny-cancelled",
+        "leg": "YesBid",
+        "price": "0.74",
+        "size": "1",
+        "matched_size": "0"
+      }
+    ],
+    "cached_balance": "100"
+  },
+  "sequence": [
+    {
+      "kind": "user_trade",
+      "trade": {
+        "trade_id": "later-large-trade",
+        "side": "BUY",
+        "price": "0.74",
+        "size": "10",
+        "asset_id": "3401",
+        "outcome": "YES"
+      }
+    }
+  ],
+  "exchange": {
+    "default_fee_rate_bps": 0,
+    "books": {
+      "yes": { "bids": [["0.73", "20"]], "asks": [["0.75", "20"]] },
+      "no": { "bids": [["0.24", "20"]], "asks": [["0.26", "20"]] }
+    },
+    "balances": [{ "amount": "100" }],
+    "positions": [{ "yes_size": "0", "no_size": "0" }],
+    "global_open_orders": [{ "orders": [] }],
+    "market_open_orders": [{ "orders": [] }],
+    "actions": []
+  },
+  "expected": {
+    "critical_events": [
+      {
+        "event_type": "fill_detected",
+        "source_component": "live_engine",
+        "payload": {
+          "trade_id": "later-large-trade",
+          "match_source": "unanchored_trade_deferred",
+          "fallback_match": false,
+          "deferred_to_reconciliation": true
+        }
+      }
+    ],
+    "success": false,
+    "halted": false
+  }
+}

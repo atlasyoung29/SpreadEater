@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Kill SpreadEater",
+      "type": "shell",
+      "command": "Stop-Process -Name spreadeater -Force -ErrorAction SilentlyContinue; if ($?) { Write-Host 'SpreadEater stopped.' } else { Write-Host 'SpreadEater is not running.' }",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "close": true
+      }
+    }
+  ]
+}

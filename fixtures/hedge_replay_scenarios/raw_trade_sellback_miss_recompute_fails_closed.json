@@ -1,0 +1,144 @@
+{
+  "name": "raw_trade_sellback_miss_recompute_fails_closed",
+  "description": "A raw trade misses the initial real-price sellback, recomputes exactly once, and still fails closed when the second residual resolution remains unresolved.",
+  "market": {
+    "condition_id": "replay-raw-trade-sellback-recompute-fail",
+    "question": "Will a second unresolved residual attempt fail closed after one recompute?",
+    "yes_token_id": "3901",
+    "no_token_id": "3902",
+    "daily_reward_total": "100",
+    "max_spread": "0.10",
+    "tick_size": "0.01"
+  },
+  "setup": {
+    "tracked_orders": [
+      {
+        "order_id": "raw-sellback-recompute-fail-fill-order",
+        "trace_id": "trace-raw-sellback-recompute-fail-fill-order",
+        "leg": "YesBid",
+        "price": "0.74",
+        "size": "10",
+        "matched_size": "0"
+      }
+    ],
+    "cached_balance": "0"
+  },
+  "sequence": [
+    { "kind": "user_connected" },
+    {
+      "kind": "user_trade",
+      "trade": {
+        "trade_id": "raw-sellback-recompute-fail-trade-1",
+        "side": "BUY",
+        "price": "0.74",
+        "size": "10",
+        "maker_order_id": "raw-sellback-recompute-fail-fill-order"
+      }
+    }
+  ],
+  "exchange": {
+    "default_fee_rate_bps": 0,
+    "books": {
+      "yes": { "bids": [["0.73", "20"]], "asks": [["0.75", "20"]] },
+      "no": { "bids": [["0.24", "20"]], "asks": [["0.26", "20"]] }
+    },
+    "balances": [{ "amount": "0" }],
+    "positions": [
+      { "yes_size": "0", "no_size": "0" },
+      { "yes_size": "10", "no_size": "0", "yes_avg_price": "0.74" },
+      { "yes_size": "10", "no_size": "0", "yes_avg_price": "0.74" },
+      { "yes_size": "10", "no_size": "0", "yes_avg_price": "0.74" }
+    ],
+    "global_open_orders": [{ "orders": [] }],
+    "market_open_orders": [{ "orders": [] }],
+    "actions": [
+      {
+        "kind": "place",
+        "expected_token_id": "3901",
+        "expected_side": "SELL",
+        "expected_order_type": "FOK",
+        "response": { "order_id": "raw-sellback-recompute-fail-order-1", "status": "delayed" },
+        "mutations": {
+          "replace_balances": [{ "amount": "0" }],
+          "replace_order_lookup": [
+            {
+              "order_id": "raw-sellback-recompute-fail-order-1",
+              "responses": [
+                {
+                  "order": {
+                    "id": "raw-sellback-recompute-fail-order-1",
+                    "leg": "YesBid",
+                    "price": "0.73",
+                    "original_size": "10",
+                    "size_matched": "0",
+                    "status": "delayed",
+                    "order_type": "FOK"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "kind": "place",
+        "expected_token_id": "3901",
+        "expected_side": "SELL",
+        "expected_order_type": "FOK",
+        "response": { "order_id": "raw-sellback-recompute-fail-order-2", "status": "delayed" },
+        "mutations": {
+          "replace_order_lookup": [
+            {
+              "order_id": "raw-sellback-recompute-fail-order-2",
+              "responses": [
+                {
+                  "order": {
+                    "id": "raw-sellback-recompute-fail-order-2",
+                    "leg": "YesBid",
+                    "price": "0.73",
+                    "original_size": "10",
+                    "size_matched": "0",
+                    "status": "delayed",
+                    "order_type": "FOK"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "critical_events": [
+      {
+        "event_type": "fill_detected",
+        "source_component": "fill_handler",
+        "payload": {
+          "trade_id": "raw-sellback-recompute-fail-trade-1",
+          "match_source": "maker_order_id",
+          "fallback_match": false,
+          "anchored_order_id": "raw-sellback-recompute-fail-fill-order",
+          "deferred_to_reconciliation": false
+        }
+      },
+      {
+        "event_type": "hedge_intent_created",
+        "payload": {
+          "hedge_side": "BUY"
+        }
+      }
+    ],
+    "success": false,
+    "halted": true,
+    "hedge_side": "BUY",
+    "planned_sellback_shares": "10",
+    "result_status": "failed",
+    "hedge_leg_status": "skipped",
+    "sellback_leg_status": "unverified",
+    "sellback_price": "0.73",
+    "post_sync_yes_size": "10",
+    "post_sync_no_size": "0",
+    "post_sync_net_exposure": "10"
+  }
+}

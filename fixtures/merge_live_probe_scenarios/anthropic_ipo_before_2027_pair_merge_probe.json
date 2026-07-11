@@ -1,0 +1,24 @@
+{
+  "name": "anthropic_ipo_before_2027_pair_merge_probe",
+  "description": "Manual Layer 3 live merge probe for the 'Anthropic IPO before 2027?' market. Self-acquires a small YES/NO pair under capped prices, then reuses the production pair-exit merge path before cleanup.",
+  "market": {
+    "condition_id": "0x6522024c060166830e53a48b0db1cab9296601a8539ab005124db5e4bf50a303",
+    "question": "Anthropic IPO before 2027?",
+    "yes_token_id": "31650083965282390269113502048883725495895331661148956202621012482964650485070",
+    "no_token_id": "79659126453744117609155577783430286183745820479892256192797614957132714720158",
+    "tick_size": "0.01",
+    "neg_risk": false
+  },
+  "acquisition": {
+    "shares": "5",
+    "yes_max_limit_price": "0.55",
+    "no_max_limit_price": "0.55"
+  },
+  "safety": {
+    "require_clean_market": true,
+    "max_yes_notional_usdc": "2.75",
+    "max_no_notional_usdc": "2.75",
+    "max_cleanup_notional_usdc": "6.50",
+    "timeout_secs": 90
+  }
+}

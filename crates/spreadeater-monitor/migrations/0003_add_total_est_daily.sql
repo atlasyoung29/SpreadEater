@@ -1,0 +1,1 @@
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS total_est_daily_usd NUMERIC;

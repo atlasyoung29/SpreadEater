@@ -1,0 +1,137 @@
+{
+  "name": "merge_success_after_full_buy_hedge",
+  "description": "YES bid fill resolves into a fully paired post-resolution position and the configured CTF merger redeems all pairs successfully.",
+  "market": {
+    "condition_id": "market-merge-success",
+    "question": "Will the merge success fixture pass?",
+    "yes_token_id": "3101",
+    "no_token_id": "3102",
+    "daily_reward_total": "100",
+    "max_spread": "0.10",
+    "tick_size": "0.01"
+  },
+  "trigger": {
+    "work_item": {
+      "tracked_order": {
+        "order_id": "fill-order-merge-success",
+        "trace_id": "trace-merge-success",
+        "leg": "YesBid",
+        "price": "0.74",
+        "size": "10",
+        "matched_size": "0"
+      },
+      "trade": {
+        "trade_id": "trade-merge-success",
+        "side": "BUY",
+        "price": "0.74",
+        "size": "10",
+        "maker_order_id": "fill-order-merge-success"
+      },
+      "anchored_order_id": "fill-order-merge-success",
+      "match_source": "maker_order_id",
+      "fallback_match": false,
+      "size_to_apply": "10",
+      "hedge_size": "10"
+    }
+  },
+  "exchange": {
+    "default_fee_rate_bps": 0,
+    "books": {
+      "yes": {
+        "bids": [["0.73", "20"]],
+        "asks": [["0.75", "20"]]
+      },
+      "no": {
+        "bids": [["0.24", "20"]],
+        "asks": [["0.26", "20"]]
+      }
+    },
+    "balances": [
+      {
+        "amount": "100"
+      },
+      {
+        "amount": "97.30"
+      }
+    ],
+    "positions": [
+      {
+        "yes_size": "0",
+        "no_size": "0"
+      },
+      {
+        "yes_size": "10",
+        "no_size": "10"
+      }
+    ],
+    "global_open_orders": [
+      {
+        "orders": []
+      }
+    ],
+    "market_open_orders": [
+      {
+        "orders": []
+      }
+    ],
+    "order_lookup": [
+      {
+        "order_id": "hedge-order-merge-success",
+        "responses": [
+          {
+            "order": {
+              "id": "hedge-order-merge-success",
+              "leg": "NoBid",
+              "price": "0.27",
+              "original_size": "10",
+              "size_matched": "10",
+              "status": "live",
+              "order_type": "GTC"
+            }
+          }
+        ]
+      }
+    ],
+    "merge": {
+      "configured": true,
+      "succeed": true,
+      "tx_hash": "0xmerge-success"
+    },
+    "actions": [
+      {
+        "kind": "place",
+        "expected_token_id": "3102",
+        "expected_side": "BUY",
+        "expected_order_type": "GTC",
+        "response": {
+          "order_id": "hedge-order-merge-success",
+          "status": "live"
+        }
+      },
+      {
+        "kind": "cancel",
+        "expected_order_id": "hedge-order-merge-success"
+      }
+    ]
+  },
+  "expected": {
+    "success": true,
+    "halted": false,
+    "hedge_side": "BUY",
+    "planned_hedge_shares": "10",
+    "result_status": "success",
+    "hedge_leg_status": "success",
+    "sellback_leg_status": "skipped",
+    "hedge_price": "0.27",
+    "post_sync_yes_size": "10",
+    "post_sync_no_size": "10",
+    "post_sync_net_exposure": "0",
+    "neutrality_residual_exposure": "0",
+    "exit_path_status": "merge_succeeded",
+    "ctf_merge_configured": true,
+    "merge_attempted": true,
+    "merge_tx_hash": "0xmerge-success",
+    "merge_eligible_pairs": "10",
+    "fallback_ask_count": 0
+  }
+}

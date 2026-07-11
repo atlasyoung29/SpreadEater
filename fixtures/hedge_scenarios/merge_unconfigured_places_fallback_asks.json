@@ -1,0 +1,151 @@
+{
+  "name": "merge_unconfigured_places_fallback_asks",
+  "description": "YES bid fill resolves into a fully paired post-resolution position, no merger is configured, and the runtime exits by placing fallback inventory asks on both sides.",
+  "market": {
+    "condition_id": "market-merge-unconfigured",
+    "question": "Will the unconfigured merge fixture report blocked fallback asks for a fully paired position?",
+    "yes_token_id": "3301",
+    "no_token_id": "3302",
+    "daily_reward_total": "100",
+    "max_spread": "0.10",
+    "tick_size": "0.01"
+  },
+  "trigger": {
+    "work_item": {
+      "tracked_order": {
+        "order_id": "fill-order-merge-unconfigured",
+        "trace_id": "trace-merge-unconfigured",
+        "leg": "YesBid",
+        "price": "0.74",
+        "size": "20",
+        "matched_size": "0"
+      },
+      "trade": {
+        "trade_id": "trade-merge-unconfigured",
+        "side": "BUY",
+        "price": "0.74",
+        "size": "20",
+        "maker_order_id": "fill-order-merge-unconfigured"
+      },
+      "anchored_order_id": "fill-order-merge-unconfigured",
+      "match_source": "maker_order_id",
+      "fallback_match": false,
+      "size_to_apply": "20",
+      "hedge_size": "20"
+    }
+  },
+  "exchange": {
+    "default_fee_rate_bps": 0,
+    "books": {
+      "yes": {
+        "bids": [["0.73", "20"]],
+        "asks": [["0.75", "20"]]
+      },
+      "no": {
+        "bids": [["0.24", "20"]],
+        "asks": [["0.26", "20"]]
+      }
+    },
+    "balances": [
+      {
+        "amount": "100"
+      }
+    ],
+    "positions": [
+      {
+        "yes_size": "0",
+        "no_size": "0"
+      },
+      {
+        "yes_size": "20",
+        "no_size": "20"
+      }
+    ],
+    "global_open_orders": [
+      {
+        "orders": []
+      }
+    ],
+    "market_open_orders": [
+      {
+        "orders": []
+      }
+    ],
+    "order_lookup": [
+      {
+        "order_id": "hedge-order-merge-unconfigured",
+        "responses": [
+          {
+            "order": {
+              "id": "hedge-order-merge-unconfigured",
+              "leg": "NoBid",
+              "price": "0.27",
+              "original_size": "20",
+              "size_matched": "20",
+              "status": "live",
+              "order_type": "GTC"
+            }
+          }
+        ]
+      }
+    ],
+    "merge": {
+      "configured": false
+    },
+    "actions": [
+      {
+        "kind": "place",
+        "expected_token_id": "3302",
+        "expected_side": "BUY",
+        "expected_order_type": "GTC",
+        "response": {
+          "order_id": "hedge-order-merge-unconfigured",
+          "status": "live"
+        }
+      },
+      {
+        "kind": "cancel",
+        "expected_order_id": "hedge-order-merge-unconfigured"
+      },
+      {
+        "kind": "place",
+        "expected_token_id": "3301",
+        "expected_side": "SELL",
+        "expected_order_type": "GTC",
+        "response": {
+          "order_id": "fallback-ask-yes",
+          "status": "live"
+        }
+      },
+      {
+        "kind": "place",
+        "expected_token_id": "3302",
+        "expected_side": "SELL",
+        "expected_order_type": "GTC",
+        "response": {
+          "order_id": "fallback-ask-no",
+          "status": "live"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "success": true,
+    "halted": false,
+    "hedge_side": "BUY",
+    "planned_hedge_shares": "20",
+    "result_status": "success",
+    "hedge_leg_status": "success",
+    "sellback_leg_status": "skipped",
+    "hedge_price": "0.27",
+    "post_sync_yes_size": "20",
+    "post_sync_no_size": "20",
+    "post_sync_net_exposure": "0",
+    "neutrality_residual_exposure": "0",
+    "exit_path_status": "fallback_asks_placed",
+    "ctf_merge_configured": false,
+    "merge_attempted": false,
+    "merge_eligible_pairs": "20",
+    "fallback_ask_count": 2
+  }
+}

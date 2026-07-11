@@ -1,0 +1,102 @@
+{
+  "name": "exchange_sync_missing_fill_sellback_cheaper",
+  "description": "Quote refresh detects a matched-size delta from exchange truth and routes it through the exchange-order-sync path, preferring a full sellback when that is cheaper.",
+  "market": {
+    "condition_id": "replay-exchange-sync-sellback",
+    "question": "Will exchange-order-sync prefer sellback when it is cheaper?",
+    "yes_token_id": "3601",
+    "no_token_id": "3602",
+    "daily_reward_total": "100",
+    "max_spread": "0.10",
+    "tick_size": "0.01"
+  },
+  "setup": {
+    "tracked_orders": [
+      {
+        "order_id": "exchange-sync-sellback-order",
+        "trace_id": "trace-exchange-sync-sellback-order",
+        "leg": "YesBid",
+        "price": "0.60",
+        "size": "10",
+        "matched_size": "0"
+      }
+    ],
+    "cached_balance": "100"
+  },
+  "sequence": [
+    { "kind": "refresh_quotes" }
+  ],
+  "exchange": {
+    "default_fee_rate_bps": 0,
+    "books": {
+      "yes": { "bids": [["0.59", "20"]], "asks": [["0.61", "20"]] },
+      "no": { "bids": [["0.54", "20"]], "asks": [["0.45", "20"]] }
+    },
+    "balances": [{ "amount": "100" }],
+    "positions": [
+      { "yes_size": "10", "no_size": "0", "yes_avg_price": "0.60" },
+      { "yes_size": "0", "no_size": "0" }
+    ],
+    "global_open_orders": [{ "orders": [] }],
+    "market_open_orders": [{ "orders": [] }],
+    "actions": [
+      {
+        "kind": "place",
+        "expected_token_id": "3601",
+        "expected_side": "SELL",
+        "expected_order_type": "FOK",
+        "response": { "order_id": "exchange-sync-sellback-exit", "status": "matched" },
+        "mutations": {
+          "replace_positions": [{ "yes_size": "0", "no_size": "0" }]
+        }
+      }
+    ]
+  },
+  "expected": {
+    "critical_events": [
+      {
+        "event_type": "fill_detected",
+        "source_component": "fill_handler",
+        "payload": {
+          "match_source": "exchange_order_sync",
+          "fallback_match": true,
+          "anchored_order_id": "exchange-sync-sellback-order"
+        }
+      },
+      {
+        "event_type": "hedge_intent_created",
+        "payload": {
+          "hedge_side": "BUY"
+        }
+      },
+      {
+        "event_type": "hedge_result_recorded",
+        "payload": {
+          "result_status": "success",
+          "hedge_leg_status": "skipped",
+          "sellback_leg_status": "success",
+          "post_sync_source": "execution_confirmed_sellback"
+        }
+      },
+      {
+        "event_type": "hedge_exit_path_recorded",
+        "payload": {
+          "exit_path_status": "sellback_complete",
+          "post_sync_source": "execution_confirmed_sellback"
+        }
+      }
+    ],
+    "success": true,
+    "halted": false,
+    "hedge_side": "BUY",
+    "planned_sellback_shares": "10",
+    "result_status": "success",
+    "hedge_leg_status": "skipped",
+    "sellback_leg_status": "success",
+    "sellback_price": "0.59",
+    "post_sync_yes_size": "0",
+    "post_sync_no_size": "0",
+    "post_sync_net_exposure": "0",
+    "neutrality_residual_exposure": "0"
+  }
+}

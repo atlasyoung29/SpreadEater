@@ -1,0 +1,29 @@
+[package]
+name = "spreadeater-monitor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+crossterm = "0.29"
+futures-util = "0.3"
+ratatui = "0.29"
+reqwest = { version = "0.12", features = ["json"] }
+rust_decimal = { version = "1", features = ["serde-with-str"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "rust_decimal", "uuid", "json", "migrate"] }
+spreadeater-core = { path = "../spreadeater-core" }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+tower-http = { version = "0.6", features = ["fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[dev-dependencies]
+tempfile = "3"

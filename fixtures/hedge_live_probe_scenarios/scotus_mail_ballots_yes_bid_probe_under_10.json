@@ -1,0 +1,32 @@
+{
+  "name": "scotus_mail_ballots_yes_bid_probe_under_10",
+  "description": "Manual Layer 3 live probe for the SCOTUS mail-ballots market. Acquires 5 YES shares live and validates the current production downstream buy-side hedge or sellback path while keeping the trigger plus cleanup budget conservative.",
+  "market": {
+    "condition_id": "0xd73237bb27cdc455578e9a0788c358bd79609d394f43a270bde10cde4788105f",
+    "question": "SCOTUS bars counting mail ballots after election day?",
+    "yes_token_id": "76334566303045905277346867543119025886786840566287031705505440465553815904146",
+    "no_token_id": "29028241542801054087697605725255170369879269520694288383584807205600183427321",
+    "tick_size": "0.01",
+    "neg_risk": false
+  },
+  "trigger": {
+    "leg": "YesBid",
+    "shares": "5",
+    "max_trigger_limit_price": "0.96"
+  },
+  "safety": {
+    "require_clean_market": true,
+    "max_planned_hedge_shares": "5",
+    "max_planned_sellback_shares": "5",
+    "max_planned_hedge_notional_usdc": "1.70",
+    "max_post_sync_net_exposure": "0.5",
+    "max_trigger_notional_usdc": "4.80",
+    "max_cleanup_notional_usdc": "5.50",
+    "timeout_secs": 60
+  },
+  "expected": {
+    "success": true,
+    "halted": false,
+    "hedge_side": "BUY"
+  }
+}

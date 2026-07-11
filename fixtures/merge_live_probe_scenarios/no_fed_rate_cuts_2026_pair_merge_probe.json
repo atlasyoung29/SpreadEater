@@ -1,0 +1,24 @@
+{
+  "name": "no_fed_rate_cuts_2026_pair_merge_probe",
+  "description": "Manual Layer 3 live merge probe for the 'Will no Fed rate cuts happen in 2026?' market. Self-acquires a small YES/NO pair under live-capped prices, then reuses the production pair-exit merge path before cleanup.",
+  "market": {
+    "condition_id": "0xd4e77ba6f29fc093509d24f508631abd445ecf506bbdc9c4c80e60256a318527",
+    "question": "Will no Fed rate cuts happen in 2026?",
+    "yes_token_id": "12403602920039269077597917340921667997547115084613238528792639013246536343316",
+    "no_token_id": "21294592205022969346730955103773391901993330222644504059576935265667917187903",
+    "tick_size": "0.001",
+    "neg_risk": true
+  },
+  "acquisition": {
+    "shares": "5",
+    "yes_max_limit_price": "0.42",
+    "no_max_limit_price": "0.65"
+  },
+  "safety": {
+    "require_clean_market": true,
+    "max_yes_notional_usdc": "2.10",
+    "max_no_notional_usdc": "3.25",
+    "max_cleanup_notional_usdc": "7.00",
+    "timeout_secs": 90
+  }
+}
