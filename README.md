@@ -29,9 +29,55 @@ The bot never pre-hedges: capital is only put at risk after a confirmed fill. It
 
 ---
 
+## Why Polymarket pays makers
+
+Polymarket runs a **liquidity rewards program**: for each eligible market it sets aside a daily reward pool and splits it among makers according to how much tight, useful liquidity each one posts. That subsidy — not a spread captured from takers — is the reason SpreadEater exists.
+
+Each resting order is scored by a spread-utility function of how close it sits to the midpoint, relative to the market's max reward spread:
+
+```text
+S(v, s) = ((v - s) / v)^2 * b
+```
+
+- `v` — the market's **max spread** from the midpoint, in cents, within which orders earn rewards (`max_incentive_spread`)
+- `s` — the order's spread (distance) from the size-cutoff-adjusted midpoint
+- `b` — an in-game size multiplier
+
+Orders closer to the mid (smaller `s`) score higher; orders beyond `v` score zero. Per-side book scores combine into a per-sample maker score `Q_min`, with a two-sidedness rule: for mid-range markets (midpoint roughly 0.10–0.90) single-sided liquidity still scores but at a reduced rate (divided by a scaling factor `c`, currently 3.0), while near the 0/1 tails liquidity must be two-sided to score at all.
+
+A maker's reward is a **normalized, time-weighted share** of that pool — not a single instantaneous ratio. Polymarket:
+
+1. samples each maker's score `Q_min` **every minute**,
+2. normalizes it against all makers in that sample — `Q_normal = Q_min / Σ Q_min`,
+3. sums those across the epoch — `Q_epoch = Σ Q_normal` over the **10,080** one-minute samples in an epoch (~7 days),
+4. normalizes once more across all makers — `Q_final = Q_epoch / Σ Q_epoch`,
+
+and the payout is:
+
+```text
+reward = Q_final * market reward pool
+```
+
+Rewards are distributed to maker addresses **daily at midnight UTC**, with a documented **$1 minimum payout** (smaller amounts are not paid). It is an allocation from a shared pool, not a guaranteed return — a maker's share scales with the pool and shrinks as competing liquidity grows.
+
+> Formula and terminology per Polymarket's [Liquidity Rewards documentation](https://docs.polymarket.com/market-makers/liquidity-rewards) (as of July 2026). Venue reward mechanics can change; treat the official docs as the source of truth.
+
+---
+
 ## How it works
 
 A concise summary of the strategy. See [`STRATEGY.md`](STRATEGY.md) for the complete, authoritative breakdown.
+
+```mermaid
+flowchart TD
+    A["1. Discover eligible markets"] --> B["2. Evaluate: quote, hedgeability, reward score"]
+    B --> C["3. Rank by reward-per-share and allocate budget"]
+    C --> D["4. Quote: post passive two-sided orders"]
+    D --> E["5. Hedge on fill: resolve exposure"]
+    E -->|loop| A
+    R["6. Risk controls and watchdog oversee order placement and hedging"] -.-> D
+    R -.-> E
+```
 
 1. **Discovery** — On a recurring interval, poll Polymarket's discovery/Gamma/data APIs for active binary markets and filter to reward-eligible candidates (minimum daily reward, sufficient time to expiry, actively accepting orders, distinct YES/NO token IDs).
 2. **Evaluation** — For each candidate market, skip cheap tail outcomes, compute a 4-leg candidate quote set (YES bid, YES ask, NO bid, NO ask), verify the opposite book has enough depth to hedge within slippage limits, and estimate the expected reward share using Polymarket's scoring formula.
@@ -39,6 +85,25 @@ A concise summary of the strategy. See [`STRATEGY.md`](STRATEGY.md) for the comp
 4. **Quoting** — Place passive bids priced a configurable fraction of the way from mid toward the reward floor, sized via score-share targeting and clamped by hedgeable depth and available budget. Resting orders are refreshed on an interval and cancel-replaced when they drift beyond a basis-point threshold.
 5. **Hedge on fill** — A dedicated async fill-handler task (never blocked by discovery/refresh work) detects fills over the user WebSocket stream and neutralizes exposure. A greedy per-share cost comparison routes each share of exposure to whichever exit is cheaper: **hedge** (buy the opposite token, then CTF-merge the pair to USDC) or **sellback** (sell the filled token back into its bid book).
 6. **Risk controls** — Per-market hedge timeout kill switch, opposite-book depth checks, slippage/hedge-cost caps, a cash reserve held back from the trading budget, and a two-layer watchdog (in-process Rust + external Python sidecar) that can halt and flatten on WebSocket/API failure.
+
+### Fill resolution
+
+When a fill is detected, the exposure is routed to whichever exit is cheaper per share, with explicit fallbacks if an on-chain merge is unavailable or fails:
+
+```mermaid
+flowchart TD
+    F["Fill detected on a resting bid"] --> G{"Cheaper per-share exit?"}
+    G -->|hedge| H["Buy opposite outcome token"]
+    G -->|sellback| S["Sell filled token back into its bid book"]
+    H --> M{"Both YES and NO held and relayer configured?"}
+    M -->|yes| MG["Attempt on-chain CTF merge to USDC"]
+    M -->|no| IA["Fallback inventory ask placed - residual exposure may remain"]
+    MG -->|merge ok| U["USDC realized, about $1.00 per pair"]
+    MG -->|merge fails| IA
+    S --> V["Resolution attempted - verify exchange position"]
+    IA --> V
+    U --> V
+```
 
 ---
 
