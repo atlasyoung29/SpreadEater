@@ -221,3 +221,9 @@ A delta-neutral rewards bot is buildable, and this one was built and run. But *h
 - **Research project, not a live earner.** SpreadEater was built and analyzed as a study of market-neutral rewards farming on Polymarket. It was not shown to clear its own costs (see [Why it doesn't work](#why-it-doesnt-work)) and is not run as a production earner.
 - **Polymarket-specific.** It targets Polymarket's CLOB V2 (EIP-712 order signing, match-time fees) and reward program; it is not a general-purpose exchange bot.
 - **No guarantees, not financial advice.** Reward, hedge, and merge behavior all depend on live venue conditions, and the strategy's own analysis concluded the edge was never demonstrated. Nothing here is a recommendation to trade.
+
+---
+
+## Acknowledgments
+
+SpreadEater was built in collaboration with **Gabe**, who contributed to the strategy design and implementation.
