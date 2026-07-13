@@ -143,85 +143,33 @@ The `spreadeater-monitor` crate provides an Axum API server (with WebSocket stre
 ## Prerequisites
 
 - **Rust toolchain** (stable; 2021 edition). Install via [rustup](https://rustup.rs).
-- **Polymarket account and API credentials** — an API key/secret/passphrase (L2 auth) plus, for live trading, a wallet private key. Supply these via environment variables / a `.env` file (see [Setup](#setup--installation)). Never commit real credentials.
+- **Polymarket account and API credentials** — an API key/secret/passphrase (L2 auth) plus, for live trading, a wallet private key, supplied via environment variables / a `.env` file. Never commit real credentials.
 - **PostgreSQL** — required only for the monitor dashboard (a `docker-compose.monitor.yml` is provided to run it in Docker). The core bot does **not** use Postgres — it archives to files, and bot-side database persistence is reserved / not yet implemented. Postgres is consumed by the monitor only.
 - **Python 3** — required only for the operator/watchdog helper scripts (e.g. the emergency kill-flatten script and the external watchdog sidecar), which use the Polymarket Python CLOB client for authenticated exchange actions (e.g. order cancellation / flatten). Not needed to build or run the core bot in shadow/dry-run mode.
 - **Node.js** — required only if you want to build the React monitor web frontend from source.
 
 ---
 
-## Setup / installation
+## Market selection, ranking & liquidity guards
 
-```bash
-# 1. Clone
-git clone <repo-url>
-cd <repo-root>
+SpreadEater is deliberately conservative about *where* it quotes. Two ideas drive it: rank markets by reward efficiency, and never post liquidity it can't hedge. The exact thresholds live in [`STRATEGY.md`](STRATEGY.md) and [`CONFIG.md`](CONFIG.md); the design is below.
 
-# 2. Build the bot (release)
-cargo build --release
+### Ranking
 
-# 3. Provide credentials via a .env file in the repo root (see below)
+Each discovery cycle, candidate markets that pass the viability gate are sorted by **reward-per-share** — estimated reward divided by the shares the bot would have to commit — so capital flows to the markets that pay the most *per share of quoted size*, not simply the ones with the largest reward pools. Budget is then allocated top-down across that ranking.
 
-# 4. Verify credentials before doing anything else
-cargo run -- auth-check
-```
+To stop the book from thrashing, a conservative **frontier rotation** runs on the discovery cycle: it can displace at most one weaker market per cycle, only reclaims resting *bid* capital (never held inventory), and only fires when the incoming market's daily reward beats the outgoing one by a configurable margin — so the bot doesn't churn orders chasing sub-penny improvements that wouldn't cover costs.
 
-### Credentials
+### Liquidity guardrails — won't quote what it can't hedge
 
-Credentials are read from environment variables (a `.env` file in the repo root is auto-loaded on startup). Use placeholders — **never commit real values**. The variables the bot reads:
+Because every fill has to be hedgeable, the bot refuses markets and orders it can't safely exit:
 
-| Variable | Required for | Purpose |
-| --- | --- | --- |
-| `POLY_API_KEY` | all authenticated modes | Polymarket L2 API key |
-| `POLY_SECRET` | all authenticated modes | L2 API secret (HMAC signing) |
-| `POLY_PASSPHRASE` | all authenticated modes | L2 API passphrase |
-| `POLY_ADDRESS` | all authenticated modes | Signer / account address |
-| `POLY_PRIVATE_KEY` | **live trading & hedging** | Wallet private key for EIP-712 order signing (required for `live` without `--dry-run`) |
-| `POLY_FUNDER` | optional | Funder / SAFE wallet address; falls back to the signer address if unset |
-| `RELAYER_API_KEY` | on-chain CTF merge | Relayer credential for gasless merge via the SAFE relayer |
-| `RELAYER_API_KEY_ADDRESS` | on-chain CTF merge | Address paired with the relayer key |
+- **Eligibility filters** — only binary, actively-quoting markets with a real daily reward pool and enough time to expiry are even considered.
+- **No cheap tails** — outcomes priced below a floor are skipped, avoiding the extreme-tail markets where a small adverse move is proportionally huge.
+- **Hedgeability admission gate** — before a bid is placed, the bot walks the *opposite* book and clamps the order down to the size it can actually hedge there; if not even the minimum size is hedgeable, the bid is rejected outright.
+- **Continuous depth checks** — while orders rest, opposite-book hedge depth is re-checked on a short interval: if it thins, the resting bid is scaled down proportionally; if hedge depth disappears, the bids are cancelled entirely (can't hedge → shouldn't be quoting).
 
-If the relayer credentials are missing, the on-chain merger is disabled and post-hedge exits fall back to inventory asks.
-
-> `POLY_BUILDER_CODE` is a **reserved** CLOB V2 builder-code field — present for future use, but not currently read or wired into order signing by the bot.
-
-Example `.env` (placeholder values only):
-
-```bash
-POLY_API_KEY=<YOUR_API_KEY>
-POLY_SECRET=<YOUR_API_SECRET>
-POLY_PASSPHRASE=<YOUR_PASSPHRASE>
-POLY_ADDRESS=<YOUR_ADDRESS>
-# Required only for live trading:
-POLY_PRIVATE_KEY=<YOUR_PRIVATE_KEY>
-# Optional / merge-related:
-POLY_FUNDER=<YOUR_FUNDER_ADDRESS>
-RELAYER_API_KEY=<YOUR_RELAYER_KEY>
-RELAYER_API_KEY_ADDRESS=<YOUR_RELAYER_ADDRESS>
-```
-
----
-
-## Configuration
-
-Runtime behavior is driven by a JSON config file (`config.json` by default; override with `--config <path>`). Every field is documented in [`CONFIG.md`](CONFIG.md). Print the built-in defaults at any time:
-
-```bash
-cargo run -- show-config
-```
-
-The config surface is grouped into sections:
-
-- **`mode`** — `Shadow` (no real orders) or `Live` (real trading).
-- **`discovery`** — reward-eligibility floor, poll interval, and the CLOB / Gamma / data API base URLs.
-- **`books`** — market WebSocket URL, book staleness threshold, and REST resync interval.
-- **`strategy`** — quote pricing (bid/ask depth, drift threshold, refresh interval), entry gates (minimum edge, minimum estimated daily reward, minimum outcome price), sizing/hedge limits (default quote size, max hedge cost, max slippage), frontier-rotation thresholds, and the reward `score_proxy` estimator parameters.
-- **`risk`** — hedge timeout kill switch, residual-exposure tolerance, and the cash reserve held back from the trading budget.
-- **`persistence`** — the file archive directory, plus a reserved `database_url` field (`null` / disabled by default; bot-side Postgres persistence is not yet implemented).
-- **`observability`** — toggle and directory for the append-only JSONL event stream consumed by the monitor.
-- **`watchdog`** — enable flag, an `enforce_actions` flag (defaults to observe-only), WebSocket-silence and reconnect thresholds, escalation timers, status-page polling settings, the heartbeat file path, and the kill-flatten script path.
-
-> All values in the repo's config files and docs are examples. Review and set them for your own account, risk tolerance, and market conditions before trading.
+In short: the bot admits bids only when current book depth provides a viable hedge path, then keeps monitoring that path; fills and market movement can still leave residual exposure.
 
 ---
 
