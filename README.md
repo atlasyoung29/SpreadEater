@@ -2,7 +2,7 @@
 
 > A local-first Rust market-making bot for Polymarket that earns liquidity rewards while working to stay delta-neutral through post-fill hedging.
 
-SpreadEater posts passive two-sided limit orders on binary prediction markets to earn Polymarket's liquidity rewards; when a fill is detected, it attempts to resolve the resulting exposure via an opposite-token hedge or sellback to minimize directional exposure. It is designed to be non-directional — profit comes from rewards, net of hedge costs and fees — though residual exposure can remain when a hedge misses or an on-chain merge fails (see [Safety](#safety)). The project also ships a companion monitor dashboard (web + terminal UI) for observing live runs.
+SpreadEater posts passive two-sided limit orders on binary prediction markets to earn Polymarket's liquidity rewards; when a fill is detected, it attempts to resolve the resulting exposure via an opposite-token hedge or sellback to minimize directional exposure. It is designed to be non-directional — profit comes from rewards, net of hedge costs and fees — though residual exposure can remain when a hedge misses or an on-chain merge fails.
 
 **Profit = liquidity rewards − hedge costs − fees**
 
@@ -25,7 +25,7 @@ The bot never pre-hedges: capital is only put at risk after a confirmed fill. It
 | **Strategy** | Two-sided passive quotes with immediate hedge-on-fill |
 | **Language** | Rust (bot + monitor API/TUI); TypeScript + React (monitor web UI) |
 
-> **Note:** This is an active, experimental trading system that places real orders and risks real funds when run in live mode. See [Safety](#safety) before running anything that touches real money.
+> **Status — research project, not a live earner.** SpreadEater was built and analyzed as a study of Polymarket rewards market-making. It works as engineering, but it was never shown to have a positive net edge after real costs — see [Why it doesn't work](#why-it-doesnt-work).
 
 ---
 
@@ -134,20 +134,6 @@ SpreadEater is a Cargo workspace with three crates:
 | `trading/` | Trading client, order manager, hedge executor, risk controls, trade parsing |
 | `watchdog/` | Watchdog manager, WebSocket health tracking, status-page poller, kill trigger |
 
-### Monitor
-
-The `spreadeater-monitor` crate provides an Axum API server (with WebSocket streaming), a projector that reads the bot's JSONL event stream into PostgreSQL, an optional terminal UI, and a React web dashboard (Overview, Open Orders, Inventory, History, Errors, Watchlist, Config tabs). The bot writes an append-only JSONL event log; the monitor consumes it — by design this keeps file and database work off the trading hot path (event emission is non-blocking through bounded channels).
-
----
-
-## Prerequisites
-
-- **Rust toolchain** (stable; 2021 edition). Install via [rustup](https://rustup.rs).
-- **Polymarket account and API credentials** — an API key/secret/passphrase (L2 auth) plus, for live trading, a wallet private key, supplied via environment variables / a `.env` file. Never commit real credentials.
-- **PostgreSQL** — required only for the monitor dashboard (a `docker-compose.monitor.yml` is provided to run it in Docker). The core bot does **not** use Postgres — it archives to files, and bot-side database persistence is reserved / not yet implemented. Postgres is consumed by the monitor only.
-- **Python 3** — required only for the operator/watchdog helper scripts (e.g. the emergency kill-flatten script and the external watchdog sidecar), which use the Polymarket Python CLOB client for authenticated exchange actions (e.g. order cancellation / flatten). Not needed to build or run the core bot in shadow/dry-run mode.
-- **Node.js** — required only if you want to build the React monitor web frontend from source.
-
 ---
 
 ## Market selection, ranking & liquidity guards
@@ -173,89 +159,51 @@ In short: the bot admits bids only when current book depth provides a viable hed
 
 ---
 
-## Usage
+## Why it doesn't work
 
-The bot is a single binary with subcommands. A global `--config <path>` flag (default `config.json`) applies to all of them. Build first, or use `cargo run -- <command>` during development.
+SpreadEater implements the full market-neutral loop — quoting both sides, then attempting to resolve detected fills back toward flat. Two things undercut it. First, live incidents showed that fill detection, hedging, verification, and flattening can each fail. Second, even when the loop runs cleanly, it never demonstrated a **positive net edge after real costs** — and that second problem is structural, worth walking through carefully because it's essentially the whole story.
 
-| Command | Places real orders? | What it does |
-| --- | --- | --- |
-| `once` | No | Run a single shadow discovery + evaluation cycle and print a summary (markets evaluated, would-trade counts). No orders. |
-| `run` | No | Run shadow mode continuously (discovery + evaluation loop, no orders). |
-| `show-config` | No | Print the default configuration as JSON. |
-| `auth-check` | No | Verify API credentials work (authenticated dry-run check). |
-| `dry-run` | No | Run one full live-pipeline cycle with real auth but simulated orders. |
-| `dry-run-loop` | No | Run the live pipeline continuously with real auth but simulated orders. |
-| `live` | **Yes** (unless `--dry-run`) | **LIVE MODE** — real order placement, fill-triggered hedging, and kill switches. Requires `POLY_PRIVATE_KEY`. |
-| `live --dry-run` | No | Run the live engine end-to-end with simulated orders (no real trades). |
-| `export` | No | Export an archived session to CSV for spreadsheet analysis. `--session <path>` (default: latest in archive), `--output <path>`. |
-| `replay` | No | Replay archived sessions through the current parameters for sensitivity analysis. `--path <file-or-dir>` (default `./data/archive`), `--competition-multiplier <f64>`. |
-
-Examples:
-
-```bash
-# Verify credentials
-cargo run -- auth-check
-
-# Full-pipeline dry run (real auth, simulated orders) — recommended before going live
-cargo run -- live --dry-run
-
-# Live trading (real orders — see the Safety section)
-cargo run -- live
-
-# Export the latest archived session to CSV
-cargo run -- export
-
-# Replay archived sessions with an overridden competition multiplier
-cargo run -- replay --path ./data/archive --competition-multiplier 2.0
+```text
+Net edge  =  rewards  -  hedge costs  -  sellback losses  -  fees  -  operational losses
 ```
 
-### Monitor dashboard
+Rewards are the only positive term, and they are small. Everything to the right is a leak — and the adverse fill is what blows the middle two wide open.
 
-The monitor is a separate binary/crate. It requires PostgreSQL (a `docker-compose.monitor.yml` is provided). Operator convenience scripts under `scripts/` (`start-monitor`, `open-monitor`, `restart-monitor`, `stop-monitor`, in `.cmd`/`.ps1`/`.sh` variants) bring up Postgres and the monitor server and print the local dashboard URL. The web dashboard exposes Overview, Open Orders, Inventory, History, Errors, Watchlist, and Config tabs.
+### The adverse fill
 
----
+A liquidity-rewards maker is paid to rest passive orders near the midpoint. But a resting order only fills when someone *takes* it — and the case that hurts is the **book sweep**: a large marketable order that sweeps through multiple price levels in a single shot.
 
-## Safety
+When that sweep lands, three things happen at once, and all of them hurt the maker:
 
-**Running `live` (without `--dry-run`) places real orders on Polymarket and puts real funds at risk.** It requires a wallet private key (`POLY_PRIVATE_KEY`) and will buy and sell outcome tokens, execute hedges, and — when a relayer is configured — attempt to merge positions on-chain automatically.
+1. **You get filled.** The passive order you posted to earn a sliver of reward is now a live position.
+2. **The sweep runs the book over.** A large order doesn't stop at your level — it clears the levels behind you and pushes the price *through* your entry. The midpoint you were quoting against is gone.
+3. **You're now on the wrong side, and drifting further from your entry** for as long as you stay exposed. The very size that filled you is the size that moved the market against you.
 
-- **Always test in shadow / dry-run first.** Use `once`, `run`, `auth-check`, `dry-run`, `dry-run-loop`, and `live --dry-run` to validate configuration and behavior before committing real capital.
-- **Guard your credentials.** Never commit `.env`, private keys, API secrets, or wallet addresses. Treat the private key as you would any wallet key.
-- **Understand the risk controls.** The hedge-timeout kill switch, opposite-book depth checks, slippage/hedge-cost caps, cash reserve, and watchdog reduce but do not eliminate risk. Hedges can miss, books can move, and on-chain merges can fail — leaving residual exposure that the bot attempts to flatten.
-- **Watchdog enforcement is off by default.** In the shipped config the watchdog runs in observe-only mode (`enforce_actions: false`); it will not automatically halt/flatten unless you enable enforcement. The external Python sidecar is a separate crash-safety net.
-- **The live hedge probe is dangerous.** The Layer 3 hedge test (see below) places real orders and costs real money. Do not run it against an account that has a live `spreadeater live` session in progress.
+That is the crux: **the fill and the adverse move are the same event.** You aren't filled and *then* unlucky — the same order that fills you is the one that pushed the price through your level.
 
-You are responsible for your own funds, credentials, and compliance. This software is provided as-is, with no warranty.
+### Hedging doesn't save the trade
 
----
+The bot's entire safety model is to neutralize immediately: hedge the opposite token, sell the position back, or merge the pair to cash. But **when resolution succeeds, getting flat and getting flat cheaply are not the same thing.**
 
-## Development & testing
+By the time it reacts, the market it must exit into has already moved. The sweep has repriced the complementary outcome and can leave the hedge either shallow or expensive; selling back means crossing a spread that just widened; a merge only helps if both legs are held and the on-chain path is available. Those exit paths can price in the adverse move and crystallize a **trading loss even when exposure is successfully reduced.**
 
-The hedge pipeline has a dedicated, layered test suite documented in full in [`HEDGE_TESTING_SUITE.md`](HEDGE_TESTING_SUITE.md). Use the cheapest, safest layer that answers your question — do not jump to Layer 3 unless you need live exchange behavior.
+That loss is the killer, because of the asymmetry with what the strategy earns:
 
-| Layer | Money risk | What it proves |
-| --- | --- | --- |
-| **Layer 1** — deterministic harness | None | Post-attribution hedge resolution: side selection, sizing, hedge-vs-sellback split, post-sync truth, halt behavior. Runs against a mock exchange. |
-| **Layer 2** — event replay | None | Pre-attribution event path: raw-trade attribution, order-update fallback, exchange-sync missed-fill detection, orphan recovery, reconciliation routing. |
-| **Layer 3** — live hedge probe | **Real** | The real downstream hedge path against live books, balances, and order submission. Places real orders — operator-only, use tiny share caps on a quiet market. |
+> **Rewards accrue in a slow trickle; adverse-fill losses arrive in a lump.**
 
-These layers run through the standard Rust test harness (`cargo test`), not as production CLI subcommands. Typical commands:
+The maker collects tiny reward increments continuously, across many markets, just for staying posted. A single severe adverse fill can hand back a large multiple of what those markets were paying — one bad exit can outweigh a long run of small reward accruals. **Ending up flat does not make that trade profitable.**
 
-```bash
-# Fast compile / type check
-cargo check --quiet
+### Why the rest of the design can't rescue it
 
-# Layer 1 (deterministic, no money risk)
-cargo test --bin spreadeater layer1_ -- --nocapture
+Every other feature compounds the same problem:
 
-# Layer 2 (replay, no money risk)
-cargo test --bin spreadeater layer2_ -- --nocapture
+- **The safe rails that limit the damage also limit the income.** Skipping cheap longshots, capping size to hedgeable depth, and halting on trouble all reduce adverse-fill exposure — and each one also walls the bot off from the richest reward zones and caps what it can earn. The safer it is, the less it makes.
+- **The reward you're competing for gets diluted.** Your share of a market's reward pool depends on how much other liquidity shows up, and the modeled capture assumes a competitive response you can't actually observe until you're in the market paying the spread.
+- **The main path explored for earning materially more makes the core problem worse.** Scaling by holding more aggregate exposure than can be hedged at any instant could raise income — but it also turns a *correlated* burst of adverse fills (a news shock, when many markets move together and depth thins everywhere at once) from a rare event into the dominant failure mode.
 
-# Full workspace test suite
-cargo test --workspace --all-targets
-```
+### The conclusion
 
-Fixtures live under `fixtures/` (e.g. `fixtures/hedge_scenarios/`, `fixtures/hedge_replay_scenarios/`, `fixtures/hedge_live_probe_scenarios/`). Operator/benchmarking helper scripts (offline run summarizers, benchmark comparison, the watchdog sidecar, and the emergency kill-flatten script) live under `scripts/`.
+A delta-neutral rewards bot is buildable, and this one was built and run. But *hedged* is not the same as *profitable.* The income accumulated gradually, while adverse-fill losses could arrive in lumps; safety constraints also limited available reward capture. The reward was never shown to clear the cost of getting run over: the record does not demonstrate positive lifetime net P&L, and the strategy's own retrospective treats further scaling as unproven.
 
 ---
 
@@ -265,12 +213,11 @@ Fixtures live under `fixtures/` (e.g. `fixtures/hedge_scenarios/`, `fixtures/hed
 | --- | --- |
 | [`STRATEGY.md`](STRATEGY.md) | Complete strategy breakdown — core thesis, market selection, quote pricing, hedge execution, CTF merge, and risk controls. |
 | [`CONFIG.md`](CONFIG.md) | Reference for every field in the JSON config file. |
-| [`HEDGE_TESTING_SUITE.md`](HEDGE_TESTING_SUITE.md) | The three-layer hedge test suite: what each layer proves, how to run it, and safety rules. |
 
 ---
 
 ## Status & caveats
 
-- **Active / experimental.** SpreadEater is a working but evolving system, developed and operated against Polymarket's live CLOB. Behavior, config keys, and internal APIs change as the strategy is tuned.
+- **Research project, not a live earner.** SpreadEater was built and analyzed as a study of market-neutral rewards farming on Polymarket. It was not shown to clear its own costs (see [Why it doesn't work](#why-it-doesnt-work)) and is not run as a production earner.
 - **Polymarket-specific.** It targets Polymarket's CLOB V2 (EIP-712 order signing, match-time fees) and reward program; it is not a general-purpose exchange bot.
-- **No guarantees.** Rewards, hedge availability, and merge execution all depend on live market and venue conditions outside the bot's control. Past behavior is not indicative of future results.
+- **No guarantees, not financial advice.** Reward, hedge, and merge behavior all depend on live venue conditions, and the strategy's own analysis concluded the edge was never demonstrated. Nothing here is a recommendation to trade.
