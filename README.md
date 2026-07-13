@@ -226,4 +226,4 @@ A delta-neutral rewards bot is buildable, and this one was built and run. But *h
 
 ## Acknowledgments
 
-SpreadEater was built in collaboration with **Gabe**, who contributed to the strategy design and implementation.
+SpreadEater was built in collaboration with **[@gabrielsalazar777](https://github.com/gabrielsalazar777)**, who contributed to the strategy design and implementation.
