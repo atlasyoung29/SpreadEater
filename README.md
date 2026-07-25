@@ -14,7 +14,7 @@ Polymarket pays liquidity rewards to makers who post resting orders close to the
 
 - **Post passively** — resting limit orders on both sides (bids and reward asks) of eligible binary markets, priced to score well against Polymarket's reward function.
 - **Hedge on fill** — when a fill is detected, SpreadEater attempts to resolve the resulting exposure through an opposite-token hedge or sellback, neutralizing the position as far as market conditions allow.
-- **Merge to cash** — when both YES and NO tokens are held for the same market, *attempt* to merge the pair on-chain into USDC at $1.00 per pair via the Conditional Token Framework (CTF) contract or the Neg Risk Adapter. Merging requires a configured private key and relayer; if those are unavailable or a merge fails, the position is exited via inventory asks instead.
+- **Merge to cash** — when both YES and NO tokens are held for the same market, *attempt* to merge the pair on-chain into USDC at par via the Conditional Token Framework (CTF) contract or the Neg Risk Adapter. Merging requires a configured private key and relayer; if those are unavailable or a merge fails, the position is exited via inventory asks instead.
 
 The bot never pre-hedges: capital is only put at risk after a confirmed fill. It runs entirely on the operator's own machine against Polymarket's public CLOB, Gamma, and data APIs.
 
@@ -58,7 +58,7 @@ and the payout is:
 reward = Q_final * market reward pool
 ```
 
-Rewards are distributed to maker addresses **daily at midnight UTC**, with a documented **$1 minimum payout** (smaller amounts are not paid). It is an allocation from a shared pool, not a guaranteed return — a maker's share scales with the pool and shrinks as competing liquidity grows.
+Rewards are distributed to maker addresses **daily at midnight UTC**, subject to a documented minimum payout threshold (smaller accruals are not paid). It is an allocation from a shared pool, not a guaranteed return — a maker's share scales with the pool and shrinks as competing liquidity grows.
 
 > Formula and terminology per Polymarket's [Liquidity Rewards documentation](https://docs.polymarket.com/market-makers/liquidity-rewards) (as of July 2026). Venue reward mechanics can change; treat the official docs as the source of truth.
 
@@ -98,12 +98,102 @@ flowchart TD
     H --> M{"Both YES and NO held and relayer configured?"}
     M -->|yes| MG["Attempt on-chain CTF merge to USDC"]
     M -->|no| IA["Fallback inventory ask placed - residual exposure may remain"]
-    MG -->|merge ok| U["USDC realized, about $1.00 per pair"]
+    MG -->|merge ok| U["USDC realized at par per completed pair"]
     MG -->|merge fails| IA
     S --> V["Resolution attempted - verify exchange position"]
     IA --> V
     U --> V
 ```
+
+---
+
+## Market selection, ranking & liquidity guards
+
+SpreadEater is deliberately conservative about *where* it quotes. Two ideas drive it: rank markets by reward efficiency, and never post liquidity it can't hedge. The exact thresholds live in [`STRATEGY.md`](STRATEGY.md) and [`CONFIG.md`](CONFIG.md); the design is below.
+
+### Ranking
+
+Each discovery cycle, candidate markets that pass the viability gate are sorted by **reward-per-share** — estimated reward divided by the shares the bot would have to commit — so capital flows to the markets that pay the most *per share of quoted size*, not simply the ones with the largest reward pools. Budget is then allocated top-down across that ranking.
+
+To stop the book from thrashing, a conservative **frontier rotation** runs on the discovery cycle: it can displace at most one weaker market per cycle, only reclaims resting *bid* capital (never held inventory), and only fires when the incoming market's daily reward beats the outgoing one by a configurable margin — so the bot doesn't churn orders chasing sub-penny improvements that wouldn't cover costs.
+
+### Liquidity guardrails — won't quote what it can't hedge
+
+Because every fill has to be hedgeable, the bot refuses markets and orders it can't safely exit:
+
+- **Eligibility filters** — only binary, actively-quoting markets with a real daily reward pool and enough time to expiry are even considered.
+- **No cheap tails** — outcomes priced below a floor are skipped, avoiding the extreme-tail markets where a small adverse move is proportionally huge.
+- **Hedgeability admission gate** — before a bid is placed, the bot walks the *opposite* book and clamps the order down to the size it can actually hedge there; if not even the minimum size is hedgeable, the bid is rejected outright.
+- **Continuous depth checks** — while orders rest, opposite-book hedge depth is re-checked on a short interval: if it thins, the resting bid is scaled down proportionally; if hedge depth disappears, the bids are cancelled entirely (can't hedge → shouldn't be quoting).
+
+---
+
+## Why it doesn't work
+
+SpreadEater implements the full market-neutral loop — quoting both sides, then attempting to resolve detected fills back toward flat. Two things undercut it. First, live incidents showed that fill detection, hedging, verification, and flattening can each fail. Second, even when the loop runs cleanly, it never demonstrated a **positive net edge after real costs** — and that second problem is structural.
+
+```text
+Net edge  =  rewards  -  hedge costs  -  sellback losses  -  fees  -  operational losses
+```
+
+Rewards are the only positive term, and they are small. Everything to the right is a leak. What follows is what the fill record shows about which leaks mattered. The figures come from Polymarket's public trade tape plus a read-only pass over the bot's own event archive; this is a post-mortem on a few hundred fills — directionally clear, and not a statistically significant result. One caveat on the raw counts: roughly half of the second funding wallet's fills were a live QA harness deliberately triggering the hedge path, so any raw fill-count statistic over that wallet is dominated by test activity rather than by the strategy.
+
+### The maker legs worked; the minutes after them did not
+
+On the legs where the bot did what it was built to do — rest a passive quote and get hit — it captured spread, and it captured it consistently. And then the price moved, and took it back.
+
+*The life of one maker fill: the spread is earned in one step and handed back in the next.*
+
+```mermaid
+flowchart LR
+    QUOTE["Resting quote<br/>at or just behind the touch"] -->|hit by a taker| EARN["EARNED at fill<br/>+328 bp spread<br/>positive on 95.3% of fills"]
+    EARN --> DRIFT["FIRST 30 SECONDS<br/>about 70% of the 60 minute adverse move"]
+    DRIFT --> BACK["GIVEN BACK by 60 min<br/>102% to 128% of the spread earned"]
+    BACK --> NET["NET after one hour<br/>about -88 bp"]
+```
+
+Both wallets show this independently. This is not a latency defect. Faster repricing would not have recovered the money — orders that had rested longest captured *more* edge, not less. A resting quote is an option written to the rest of the market, and this is what exercising it costs. *Why* the price moved is not observable from this data: the tape shows fills, not identities or motives, and no claim is made about what any counterparty knew or intended. What is measurable is that price moved against the fill, quickly, on most fills. That is the cost of standing in a book, and it is not something engineering removes.
+
+### Getting flat means crossing the book
+
+The hedge leg is a taker order by construction — to get flat, the bot has to cross. Too often it crossed with an order larger than the book in front of it, and paid for the extra size on the way down.
+
+*One hedge order eating through several price levels on its way to flat, what that cost, and the two fixable causes behind it.*
+
+```mermaid
+flowchart LR
+    HEDGE["Hedge order<br/>a taker order by construction"] --> LV1["Level 1<br/>best offer"]
+    LV1 --> LV2["Level 2"]
+    LV2 --> LV3["Level 3<br/>and deeper"]
+    LV3 --> COST["Cost of walking the book<br/>105.6 bp of taker notional<br/>54.6% of measured at-fill cost, on about 20% of fills"]
+    FREQ["Crossed 2 or more levels on 38.1% of crossings<br/>vs a 13.8% base rate for a typical aggressor, about 2.8x"] -.-> LV2
+    FIX1["Fixable: early sizing bug hedged 2 to 4.8x the needed size<br/>fixed, median ratio afterward exactly 1.00x"] -.-> HEDGE
+    FIX2["Fixable: median hedge latency 240 s<br/>against a move about 70% complete at 30 s"] -.-> HEDGE
+```
+
+### The arithmetic underneath
+
+Beneath both of the above sits a simpler problem, and it rests on no claim about what the market did: what a fill earns is smaller than what getting flat costs.
+
+*The two magnitudes side by side — rewards in, one required crossing out.*
+
+```mermaid
+flowchart LR
+    FILL["Every fill"] --> REW["IN: rewards earned<br/>about 0.2% to 0.4% of notional"]
+    FILL --> CROSS["OUT: the one required crossing<br/>about 0.6% to 0.7% of face value"]
+    REW --> VERDICT["OUT is the larger number<br/>and at least one crossing is required per fill"]
+    CROSS --> VERDICT
+```
+
+> **Unit caveat, stated because the comparison is otherwise too tidy:** rewards are measured against traded notional while the crossing cost is measured against a share's face value, so this is an order-of-magnitude argument about which term is larger, not a precise ratio.
+
+### The conclusion
+
+A delta-neutral rewards bot is buildable, and this one was built and run. But *hedged* is not the same as *profitable*, and **getting flat is not the same as getting flat cheaply.**
+
+The maker legs did their job. Post-fill drift took it back within the hour, on both wallets independently — a cost of standing in a book that a wider spread, better market selection or inventory-aware skewing might reduce, but that no amount of latency engineering touches. The bot's own hedge orders carried the majority of measurable execution cost, which *was* fixable. And underneath both, the arithmetic: the reward earned per unit of notional was smaller than the cost of the one crossing the design required to get flat.
+
+**The record does not demonstrate positive lifetime net P&L**, and the strategy's own retrospective treats further scaling as unproven. The engineering verdict is separate and it stands — replayable test harnesses, a large unit-test suite, forensic-grade event logs good enough to reconstruct a resting order's lifecycle months later, a watchdog, and a real structural invariant.
 
 ---
 
@@ -136,77 +226,6 @@ SpreadEater is a Cargo workspace with three crates:
 
 ---
 
-## Market selection, ranking & liquidity guards
-
-SpreadEater is deliberately conservative about *where* it quotes. Two ideas drive it: rank markets by reward efficiency, and never post liquidity it can't hedge. The exact thresholds live in [`STRATEGY.md`](STRATEGY.md) and [`CONFIG.md`](CONFIG.md); the design is below.
-
-### Ranking
-
-Each discovery cycle, candidate markets that pass the viability gate are sorted by **reward-per-share** — estimated reward divided by the shares the bot would have to commit — so capital flows to the markets that pay the most *per share of quoted size*, not simply the ones with the largest reward pools. Budget is then allocated top-down across that ranking.
-
-To stop the book from thrashing, a conservative **frontier rotation** runs on the discovery cycle: it can displace at most one weaker market per cycle, only reclaims resting *bid* capital (never held inventory), and only fires when the incoming market's daily reward beats the outgoing one by a configurable margin — so the bot doesn't churn orders chasing sub-penny improvements that wouldn't cover costs.
-
-### Liquidity guardrails — won't quote what it can't hedge
-
-Because every fill has to be hedgeable, the bot refuses markets and orders it can't safely exit:
-
-- **Eligibility filters** — only binary, actively-quoting markets with a real daily reward pool and enough time to expiry are even considered.
-- **No cheap tails** — outcomes priced below a floor are skipped, avoiding the extreme-tail markets where a small adverse move is proportionally huge.
-- **Hedgeability admission gate** — before a bid is placed, the bot walks the *opposite* book and clamps the order down to the size it can actually hedge there; if not even the minimum size is hedgeable, the bid is rejected outright.
-- **Continuous depth checks** — while orders rest, opposite-book hedge depth is re-checked on a short interval: if it thins, the resting bid is scaled down proportionally; if hedge depth disappears, the bids are cancelled entirely (can't hedge → shouldn't be quoting).
-
-In short: the bot admits bids only when current book depth provides a viable hedge path, then keeps monitoring that path; fills and market movement can still leave residual exposure.
-
----
-
-## Why it doesn't work
-
-SpreadEater implements the full market-neutral loop — quoting both sides, then attempting to resolve detected fills back toward flat. Two things undercut it. First, live incidents showed that fill detection, hedging, verification, and flattening can each fail. Second, even when the loop runs cleanly, it never demonstrated a **positive net edge after real costs** — and that second problem is structural, worth walking through carefully because it's essentially the whole story.
-
-```text
-Net edge  =  rewards  -  hedge costs  -  sellback losses  -  fees  -  operational losses
-```
-
-Rewards are the only positive term, and they are small. Everything to the right is a leak — and the adverse fill is what blows the middle two wide open.
-
-### The adverse fill
-
-A liquidity-rewards maker is paid to rest passive orders near the midpoint. But a resting order only fills when someone *takes* it — and the case that hurts is the **book sweep**: a large marketable order that sweeps through multiple price levels in a single shot.
-
-When that sweep lands, three things happen at once, and all of them hurt the maker:
-
-1. **You get filled.** The passive order you posted to earn a sliver of reward is now a live position.
-2. **The sweep runs the book over.** A large order doesn't stop at your level — it clears the levels behind you and pushes the price *through* your entry. The midpoint you were quoting against is gone.
-3. **You're now on the wrong side, and drifting further from your entry** for as long as you stay exposed. The very size that filled you is the size that moved the market against you.
-
-That is the crux: **the fill and the adverse move are the same event.** You aren't filled and *then* unlucky — the same order that fills you is the one that pushed the price through your level.
-
-### Hedging doesn't save the trade
-
-The bot's entire safety model is to neutralize immediately: hedge the opposite token, sell the position back, or merge the pair to cash. But **when resolution succeeds, getting flat and getting flat cheaply are not the same thing.**
-
-By the time it reacts, the market it must exit into has already moved. The sweep has repriced the complementary outcome and can leave the hedge either shallow or expensive; selling back means crossing a spread that just widened; a merge only helps if both legs are held and the on-chain path is available. Those exit paths can price in the adverse move and crystallize a **trading loss even when exposure is successfully reduced.**
-
-That loss is the killer, because of the asymmetry with what the strategy earns:
-
-> **Rewards accrue in a slow trickle; adverse-fill losses arrive in a lump.**
-
-The maker collects tiny reward increments continuously, across many markets, just for staying posted. A single severe adverse fill can hand back a large multiple of what those markets were paying — one bad exit can outweigh a long run of small reward accruals. **Ending up flat does not make that trade profitable.**
-
-### Why the rest of the design can't rescue it
-
-Every other feature compounds the same problem:
-
-- **The safe rails that limit the damage also limit the income.** Skipping cheap longshots, capping size to hedgeable depth, and halting on trouble all reduce adverse-fill exposure — and each one also walls the bot off from the richest reward zones and caps what it can earn. The safer it is, the less it makes.
-- **The reward you're competing for gets diluted.** Your share of a market's reward pool depends on how much other liquidity shows up, and the modeled capture assumes a competitive response you can't actually observe until you're in the market paying the spread.
-- **The main path explored for earning materially more makes the core problem worse.** Scaling by holding more aggregate exposure than can be hedged at any instant could raise income — but it also turns a *correlated* burst of adverse fills (a news shock, when many markets move together and depth thins everywhere at once) from a rare event into the dominant failure mode.
-
-### The conclusion
-
-A delta-neutral rewards bot is buildable, and this one was built and run. But *hedged* is not the same as *profitable.* The income accumulated gradually, while adverse-fill losses could arrive in lumps; safety constraints also limited available reward capture. The reward was never shown to clear the cost of getting run over: the record does not demonstrate positive lifetime net P&L, and the strategy's own retrospective treats further scaling as unproven.
-
----
-
 ## Documentation index
 
 | Document | Contents |
@@ -220,10 +239,12 @@ A delta-neutral rewards bot is buildable, and this one was built and run. But *h
 
 - **Research project, not a live earner.** SpreadEater was built and analyzed as a study of market-neutral rewards farming on Polymarket. It was not shown to clear its own costs (see [Why it doesn't work](#why-it-doesnt-work)) and is not run as a production earner.
 - **Polymarket-specific.** It targets Polymarket's CLOB V2 (EIP-712 order signing, match-time fees) and reward program; it is not a general-purpose exchange bot.
+- **On the post-mortem numbers.** They come from public on-chain data reconstructed after the fact, not from the project's own accounting. Three limitations travel with them: the maker/taker split relies on a venue query parameter that Polymarket exposes but does not document in writing (corroborated four independent structural ways, but still an inference); **only fills are observable**, so orders placed, rested and cancelled leave no trace anywhere in the data; and the maker samples are small — 100 and 29 fills — so "no effect" means "no large effect," not "exactly zero."
+- **No claim is made about counterparties.** Nothing in this data observes who traded against the bot, what they knew, or why. Only that price moved against the fill afterward.
 - **No guarantees, not financial advice.** Reward, hedge, and merge behavior all depend on live venue conditions, and the strategy's own analysis concluded the edge was never demonstrated. Nothing here is a recommendation to trade.
 
 ---
 
 ## Acknowledgments
 
-SpreadEater was built in collaboration with **[@gabrielsalazar777](https://github.com/gabrielsalazar777)**, who contributed to the strategy design and implementation.
+SpreadEater was built in collaboration with **[@gabrielsalazar777](https://github.com/gabrielsalazar777)**, who contributed to the strategy design and led the testing and validation infrastructure, observability and benchmarking, and the monitoring dashboard. Much of the design was worked out in conversation rather than in writing, so any division of labor is descriptive rather than exact.
