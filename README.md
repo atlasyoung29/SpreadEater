@@ -154,26 +154,9 @@ flowchart LR
 
 Both wallets show this independently. This is not a latency defect. Faster repricing would not have recovered the money — orders that had rested longest captured *more* edge, not less. A resting quote is an option written to the rest of the market, and this is what exercising it costs. *Why* the price moved is not observable from this data: the tape shows fills, not identities or motives, and no claim is made about what any counterparty knew or intended. What is measurable is that price moved against the fill, quickly, on most fills. That is the cost of standing in a book, and it is not something engineering removes.
 
-### Getting flat means crossing the book
-
-The hedge leg is a taker order by construction — to get flat, the bot has to cross. Too often it crossed with an order larger than the book in front of it, and paid for the extra size on the way down.
-
-*One hedge order eating through several price levels on its way to flat, what that cost, and the two fixable causes behind it.*
-
-```mermaid
-flowchart LR
-    HEDGE["Hedge order<br/>a taker order by construction"] --> LV1["Level 1<br/>best offer"]
-    LV1 --> LV2["Level 2"]
-    LV2 --> LV3["Level 3<br/>and deeper"]
-    LV3 --> COST["Cost of walking the book<br/>105.6 bp of taker notional<br/>54.6% of measured at-fill cost, on about 20% of fills"]
-    FREQ["Crossed 2 or more levels on 38.1% of crossings<br/>vs a 13.8% base rate for a typical aggressor, about 2.8x"] -.-> LV2
-    FIX1["Fixable: early sizing bug hedged 2 to 4.8x the needed size<br/>fixed, median ratio afterward exactly 1.00x"] -.-> HEDGE
-    FIX2["Fixable: median hedge latency 240 s<br/>against a move about 70% complete at 30 s"] -.-> HEDGE
-```
-
 ### The arithmetic underneath
 
-Beneath both of the above sits a simpler problem, and it rests on no claim about what the market did: what a fill earns is smaller than what getting flat costs.
+Beneath that sits a simpler problem, and it rests on no claim about what the market did: what a fill earns is smaller than what getting flat costs.
 
 *The two magnitudes side by side — rewards in, one required crossing out.*
 
@@ -191,7 +174,7 @@ flowchart LR
 
 A delta-neutral rewards bot is buildable, and this one was built and run. But *hedged* is not the same as *profitable*, and **getting flat is not the same as getting flat cheaply.**
 
-The maker legs did their job. Post-fill drift took it back within the hour, on both wallets independently — a cost of standing in a book that a wider spread, better market selection or inventory-aware skewing might reduce, but that no amount of latency engineering touches. The bot's own hedge orders carried the majority of measurable execution cost, which *was* fixable. And underneath both, the arithmetic: the reward earned per unit of notional was smaller than the cost of the one crossing the design required to get flat.
+The maker legs did their job. Post-fill drift took it back within the hour, on both wallets independently — a cost of standing in a book that a wider spread, better market selection or inventory-aware skewing might reduce, but that no amount of latency engineering touches. And underneath that, the arithmetic: the reward earned per unit of notional was smaller than the cost of the one crossing the design required to get flat.
 
 **The record does not demonstrate positive lifetime net P&L**, and the strategy's own retrospective treats further scaling as unproven. The engineering verdict is separate and it stands — replayable test harnesses, a large unit-test suite, forensic-grade event logs good enough to reconstruct a resting order's lifecycle months later, a watchdog, and a real structural invariant.
 
