@@ -68,16 +68,10 @@ Rewards are distributed to maker addresses **daily at midnight UTC**, subject to
 
 A concise summary of the strategy. See [`STRATEGY.md`](STRATEGY.md) for the complete, authoritative breakdown.
 
-```mermaid
-flowchart TD
-    A["1. Discover eligible markets"] --> B["2. Evaluate: quote, hedgeability, reward score"]
-    B --> C["3. Rank by reward-per-share and allocate budget"]
-    C --> D["4. Quote: post passive two-sided orders"]
-    D --> E["5. Hedge on fill: resolve exposure"]
-    E -->|loop| A
-    R["6. Risk controls and watchdog oversee order placement and hedging"] -.-> D
-    R -.-> E
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/se-flow.svg">
+  <img alt="The SpreadEater pipeline: discover reward-eligible Polymarket markets on a 61-second cycle, filter them for eligibility, rank by reward per share, and quote both sides only where the opposite book can hedge the size — otherwise skip to the next cycle. On a fill, route each share to whichever exit is cheaper: buy the opposite token and merge the YES+NO pair on-chain for one dollar, or sell the filled token back into its bid book. Then verify the position is flat and start the next cycle." src="docs/se-flow-light.svg">
+</picture>
 
 1. **Discovery** — On a recurring interval, poll Polymarket's discovery/Gamma/data APIs for active binary markets and filter to reward-eligible candidates (minimum daily reward, sufficient time to expiry, actively accepting orders, distinct YES/NO token IDs).
 2. **Evaluation** — For each candidate market, skip cheap tail outcomes, compute a 4-leg candidate quote set (YES bid, YES ask, NO bid, NO ask), verify the opposite book has enough depth to hedge within slippage limits, and estimate the expected reward share using Polymarket's scoring formula.

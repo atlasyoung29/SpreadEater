@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 494" width="300" height="494"
+     role="img" aria-labelledby="se-flow-title" fill="none">
+  <title id="se-flow-title">The SpreadEater pipeline: discover reward-eligible Polymarket markets on a 61-second cycle, filter them for eligibility, rank by reward per share, and quote both sides only where the opposite book can hedge the size — otherwise skip to the next cycle. On a fill, route each share to whichever exit is cheaper: buy the opposite token and merge the YES+NO pair on-chain for one dollar, or sell the filled token back into its bid book. Then verify the position is flat and start the next cycle.</title>
+
+  <defs>
+    <marker id="se-arrow" viewBox="0 0 8 8" refX="6.2" refY="4"
+            markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M0.6 1 6.4 4 0.6 7Z" fill="#575450"/>
+    </marker>
+  </defs>
+
+  <!-- Light-theme twin of se-flow.svg: identical geometry, palette mirrored
+       about the surface so a GitHub reader on the light theme doesn't get a
+       black slab. Still monochrome, and the Fill block is still the one
+       inverted element — dark box, light text. -->
+  <rect x="0" y="0" width="300" height="494" fill="#f3f2f0"/>
+
+  <g font-family="ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', 'SF Mono', Menlo, Consolas, monospace"
+     text-anchor="middle">
+
+    <!-- nodes -->
+    <g fill="#ffffff" stroke="#d6d3cf">
+      <rect x="22" y="8"   width="266" height="24"/>
+      <rect x="22" y="43"  width="266" height="24"/>
+      <rect x="22" y="78"  width="266" height="24"/>
+      <path d="M40 132 60 113H250L270 132 250 151H60Z"/>
+      <rect x="22" y="162" width="266" height="30"/>
+      <rect x="22" y="203" width="266" height="30"/>
+      <path d="M40 298 60 279H250L270 298 250 317H60Z"/>
+      <rect x="22"  y="345" width="128" height="30"/>
+      <rect x="160" y="345" width="128" height="30"/>
+      <rect x="22"  y="386" width="128" height="30"/>
+      <rect x="22"  y="439" width="266" height="30"/>
+    </g>
+
+    <!-- The one inverted block, kept from the diagram this replaces: the fill
+         is the event the whole loop exists to produce. -->
+    <rect x="22" y="244" width="266" height="24" fill="#191817" stroke="#191817"/>
+
+    <!-- primary labels -->
+    <g font-size="12" fill="#191817">
+      <text x="155" y="24">Discover markets · every 61s</text>
+      <text x="155" y="59">Filter for eligibility</text>
+      <text x="155" y="94">Rank by reward per share</text>
+      <text x="155" y="130">Hedgeable opposite book?</text>
+      <text x="155" y="176">Quote both sides</text>
+      <text x="155" y="217">Resting orders</text>
+      <text x="155" y="260" fill="#f6f5f3">Fill on a resting bid</text>
+      <text x="155" y="296">Which exit is cheaper?</text>
+      <text x="86"  y="359">Hedge</text>
+      <text x="224" y="359">Sell back</text>
+      <text x="86"  y="400">Merge on-chain</text>
+      <text x="155" y="453">Verify flat</text>
+    </g>
+
+    <!-- secondary labels -->
+    <g font-size="9.5" fill="#575450">
+      <text x="155" y="142">depth ≥ size · slippage ≤ 80 bps</text>
+      <text x="155" y="187">size capped to hedgeable depth</text>
+      <text x="155" y="228">depth re-check 2s · reprice 5s</text>
+      <text x="155" y="308">per share, walking both books</text>
+      <text x="86"  y="370">buy opposite token</text>
+      <text x="224" y="370">into its bid book</text>
+      <text x="86"  y="411">YES+NO pair → $1.00</text>
+      <text x="155" y="464">net ≤ 0.5 shares · else kill market</text>
+    </g>
+
+    <!-- edge labels -->
+    <g font-size="9.5" fill="#575450">
+      <text x="25"  y="128">no</text>
+      <text x="161" y="159" text-anchor="start">yes</text>
+      <text x="120" y="329">hedge</text>
+      <text x="190" y="329">sell back</text>
+      <text x="82"  y="482">flat → next cycle</text>
+    </g>
+  </g>
+
+  <!-- connectors -->
+  <g stroke="#575450" stroke-width="1" marker-end="url(#se-arrow)">
+    <path d="M155 32V42"/>
+    <path d="M155 67V77"/>
+    <path d="M155 102V112"/>
+    <path d="M155 151V161"/>
+    <path d="M155 192V202"/>
+    <path d="M155 233V243"/>
+    <path d="M155 268V278"/>
+    <path d="M86 332V344"/>
+    <path d="M224 332V344"/>
+    <path d="M86 375V385"/>
+    <path d="M155 426V438"/>
+  </g>
+  <g stroke="#575450" stroke-width="1">
+    <path d="M155 317V332"/>
+    <path d="M86 332H224"/>
+    <path d="M86 416V426H155"/>
+    <path d="M224 375V426H155"/>
+  </g>
+
+  <!-- the two ways back to the top of the loop: rejected on hedgeability,
+       or flat and done with this fill -->
+  <g stroke="#575450" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#se-arrow)">
+    <path d="M40 132H10"/>
+    <path d="M155 469V486H9V20H21"/>
+  </g>
+</svg>
