@@ -1,5 +1,17 @@
 # SpreadEater: A Strategy Research Paper On Hedged Liquidity Rewards
 
+## Update — 2026-07-26
+
+This paper's economic conclusion was reasoned from architecture and contemporaneous logs, before the fill record itself had been analysed.
+
+A later forensic pass over the on-chain fills found a simpler and stronger reason the strategy does not close: liquidity rewards were recovered on the order of 0.2-0.4% of traded notional, while crossing from the mid to the touch cost roughly 0.6-0.7% of a share's $1.00 redemption value, and the hedge leg is a taker order by construction, so every fill pays that crossing.
+
+Because the crossing is required once per fill rather than incurred by scale, the shortfall is structural rather than a scaling or tuning question, and no parameter setting closes it.
+
+The comparison is an order-of-magnitude argument rather than a precise ratio, because rewards are measured against traded notional while the crossing cost is measured against a share's $1.00 face.
+
+The "not proven scalable" framing below is superseded by that finding. The original reasoning is left in place as a record of what the evidence supported at the time.
+
 ## Human Summary
 
 This paper frames SpreadEater as a strategy research project, not just a software build.
@@ -28,7 +40,7 @@ The proposed scaling path, Operation Normandy, could have increased market count
 
 The rational stop point was reached when the project split into two paths: keep Standard mode safe but lower-yield, or chase higher rewards with materially higher correlated-fill and operational risk.
 
-Conclusion: SpreadEater proved that a hedged rewards bot can be engineered, but did not prove that the net edge was large enough to justify scaling beyond the safe Standard strategy.
+Conclusion: SpreadEater proved that a hedged rewards bot can be engineered, but the reward earned per fill is smaller than the crossing that same fill must pay to get flat, and that shortfall is structural rather than a question of scale.
 
 Confidence in this paper's reconstruction: 0.87.
 
@@ -398,7 +410,7 @@ The project likely stopped because the next phase did not offer a clean continua
 | Expand with Normandy | Increase market count and reward capture. | Creates aggregate exposure and correlated-fill risk. |
 | Continue hardening | Reduce operational failures. | Does not by itself prove positive economics. |
 
-The rational strategic conclusion was that the project had proven engineering feasibility but not scalable economic attractiveness.
+The rational strategic conclusion was that the project had proven engineering feasibility, and the later fill analysis showed the economics fail at the level of a single fill rather than at the level of scale.
 
 Confidence: 0.86.
 
@@ -417,10 +429,11 @@ In research-paper terms:
 | The safe Standard strategy captures the highest reward zones. | Not supported. |
 | Scaling through aggregate exposure is economically attractive. | Unproven. |
 | Continued development was clearly justified by reward upside. | Not established. |
+| The reward earned per fill exceeds the crossing that fill must pay. | Not supported. |
 
 Final conclusion:
 
-SpreadEater validated the engineering discipline needed for hedged market-making, but the risk-adjusted economics did not justify continuing without a new formal validation phase.
+SpreadEater validated the engineering discipline needed for hedged market-making, but the strategy pays more to hedge each fill than the reward program pays it to quote, and that inequality is structural rather than a matter of tuning or scale.
 
 Overall confidence: 0.87.
 

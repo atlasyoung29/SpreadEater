@@ -12,9 +12,9 @@ SpreadEater is a **fully hedged liquidity-rewards market maker** on Polymarket.
 - Immediately hedge every fill to stay **delta-neutral** — no directional exposure, ever
 - Merge YES + NO token pairs on-chain via the standard CTF contract or the Neg Risk Adapter to lock in profit as USDC
 
-**Profit = liquidity rewards − hedge costs − fees**
+**Net = liquidity rewards − hedge costs − sellback losses − fees − operational losses**
 
-The bot does not take directional bets. All profit comes from the reward program.
+The bot does not take directional bets. Rewards are the only positive term; everything else is a leak.
 
 ---
 

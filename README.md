@@ -4,7 +4,7 @@
 
 SpreadEater posts passive two-sided limit orders on binary prediction markets to earn Polymarket's liquidity rewards; when a fill is detected, it attempts to resolve the resulting exposure via an opposite-token hedge or sellback to minimize directional exposure. It is designed to be non-directional — profit comes from rewards, net of hedge costs and fees — though residual exposure can remain when a hedge misses or an on-chain merge fails.
 
-**Profit = liquidity rewards − hedge costs − fees**
+**Net = liquidity rewards − hedge costs − sellback losses − fees − operational losses**
 
 ---
 
@@ -156,7 +156,7 @@ Both wallets show this independently. This is not a latency defect. Faster repri
 
 ### The arithmetic underneath
 
-Beneath that sits a simpler problem, and it rests on no claim about what the market did: what a fill earns is smaller than what getting flat costs.
+Beneath that sits a simpler problem, and it rests on no claim about what the market did: the hedge leg is a taker order by construction, so every fill pays a crossing — and the crossing costs more than the reward program pays.
 
 *The two magnitudes side by side — rewards in, one required crossing out.*
 
@@ -167,6 +167,8 @@ flowchart LR
     REW --> VERDICT["OUT is the larger number<br/>and at least one crossing is required per fill"]
     CROSS --> VERDICT
 ```
+
+That inequality is structural, not a tuning problem. No parameter setting removes it — the hedge leg still has to cross.
 
 > **Unit caveat, stated because the comparison is otherwise too tidy:** rewards are measured against traded notional while the crossing cost is measured against a share's face value, so this is an order-of-magnitude argument about which term is larger, not a precise ratio.
 
