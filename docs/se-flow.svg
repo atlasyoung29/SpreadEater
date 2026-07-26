@@ -52,7 +52,7 @@
 
     <!-- secondary labels -->
     <g font-size="9.5" fill="#9a9691">
-      <text x="155" y="142">depth ≥ size · slippage ≤ 80 bps</text>
+      <text x="155" y="142">depth ≥ size</text>
       <text x="155" y="187">size capped to hedgeable depth</text>
       <text x="155" y="228">depth re-check 2s · reprice 5s</text>
       <text x="155" y="308">per share, walking both books</text>
